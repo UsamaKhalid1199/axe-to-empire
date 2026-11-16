@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128"><defs>
+<radialGradient id="gold" cx="38%" cy="32%" r="75%"><stop offset="0" stop-color="#FFF1B0"/><stop offset=".45" stop-color="#FFC943"/><stop offset="1" stop-color="#C77A0E"/></radialGradient>
+<linearGradient id="goldl" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FFE08A"/><stop offset="1" stop-color="#E08E14"/></linearGradient>
+<linearGradient id="wood" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#9A6438"/><stop offset="1" stop-color="#5A3518"/></linearGradient>
+<radialGradient id="ring" cx="50%" cy="50%" r="50%"><stop offset="0" stop-color="#F2CF92"/><stop offset=".75" stop-color="#D9A462"/><stop offset=".86" stop-color="#9C6332"/><stop offset="1" stop-color="#4A2C14"/></radialGradient>
+<linearGradient id="steel" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#F4F6F8"/><stop offset=".5" stop-color="#AEB5BC"/><stop offset="1" stop-color="#6D757D"/></linearGradient>
+<linearGradient id="orange" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FF9A3D"/><stop offset="1" stop-color="#D2560E"/></linearGradient>
+<linearGradient id="green" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#8EDB6E"/><stop offset="1" stop-color="#2E8F45"/></linearGradient>
+<linearGradient id="fire" x1="0" y1="1" x2="0" y2="0"><stop offset="0" stop-color="#FF5A1F"/><stop offset=".6" stop-color="#FFB12E"/><stop offset="1" stop-color="#FFE68A"/></linearGradient>
+</defs><circle cx="64" cy="64" r="50" fill="url(#green)"/><path d="M40 66 L57 83 L90 48" fill="none" stroke="#FFFFFF" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/></svg>

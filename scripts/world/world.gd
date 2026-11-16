@@ -1,0 +1,1337 @@
+extends Node3D
+## Chapter 1 "Forest Camp": layout, stations, build pads, customers, crew, fires, FX, objective.
+
+signal zone_entered(kind: String, id: String)
+signal zone_exited(kind: String, id: String)
+signal float_text(text: String, world_pos: Vector3, color: Color)
+
+const SPAWN := Vector3(0, 0, -3.6)
+var LOW_END := OS.has_feature("mobile")
+const PILE_POS := Vector3(-2.7, 0, -2.1)
+const FIRE_POS := [Vector3(-0.3, 0, -1.8), Vector3(1.9, 0, -1.8)]
+const RACK_POS := Vector3(0.8, 0, 0.35)
+const COUNTER_POS := Vector3(0.8, 0, 3.3)
+const COIN_POS := Vector3(2.95, 0, 2.55)
+const TRUCK_POS := Vector3(-8.2, 0, 3.6)
+const SELL_POS := Vector3(-6.1, 0, 2.6)
+const SHOP_POS := Vector3(6.3, 0, -2.6)
+const CREW_POS := Vector3(6.6, 0, 3.4)
+const GATE_POS := Vector3(-9.5, 0, 11.5)
+const ROAD_Z := 11.5
+const TABLE_SCALE := 0.85
+const ROAD_EAST := Vector3(20, 0, 11.5)
+const TABLES := {
+	"tables_1": [Vector3(-3.2, 0, 4.6), Vector3(-3.2, 0, 8.7)],
+	"tables_2": [Vector3(5.0, 0, 5.6), Vector3(5.0, 0, 9.5)],
+}
+const PADS := {
+	"campfire": Vector3(-0.3, 0, -1.8), "tables_1": Vector3(-3.2, 0, 6.65), "shop": Vector3(5.2, 0, -0.9),
+	"crew_hut": Vector3(5.0, 0, 3.4), "fire_2": Vector3(1.9, 0, -1.8), "tables_2": Vector3(5.0, 0, 7.55),
+	"gate": Vector3(-7.6, 0, 11.5),
+}
+
+var player: Player
+var cam: Camera3D
+var trees: Array[ChopTree] = []
+var zones: Array[Zone] = []
+var pads: Dictionary = {}
+var buildings: Dictionary = {}
+var pile: Stack
+var rack_stack: Stack
+var counter_stack: Stack
+var coin_stack: Stack
+var pile_zone: Zone
+var rack_zone: Zone
+var serve_zone: Zone
+var coin_zone: Zone
+var sell_zone: Zone
+var fires: Array = []          # {pos, cooking, t, ring, built}
+var customers: Array = []
+var queue: Array = []
+var seats: Array = []          # {pos, center, by, plate}
+var workers: Array = []
+var spawn_t := 3.0
+var cust_seed := 0
+var objective := {"text": "", "pos": Vector3.ZERO}
+var arrow: Node3D
+var _fx_pool: Array[CPUParticles3D] = []
+var _fx_i := 0
+var _shake := 0.0
+var _cam_target := Vector3.ZERO
+var _inside: Dictionary = {}
+var _engaged := {}          # zone -> player has stopped on it (actions running)
+var _obj_t := 0.0
+var cam_off := Vector3(0, 10.5, 8.2)
+var theme: Dictionary = {}
+
+
+func _tc(key: String, def: Color) -> Color:
+	var a: Array = theme.get(key, [])
+	return Color(a[0], a[1], a[2]) if a.size() >= 3 else def
+
+
+## When true, main.gd drives the build step by step (so the loading bar moves).
+var staged := false
+
+
+func _ready() -> void:
+	theme = Game.chapter().theme
+	Art.retint_foliage(theme)
+	if staged:
+		process_mode = Node.PROCESS_MODE_DISABLED
+		return
+	for st in build_steps():
+		st[1].call()
+
+
+## [label, step] pairs; run in order to build the venue.
+func build_steps() -> Array:
+	return [
+		["Painting the sky", _env],
+		["Laying the ground", _ground],
+		["Planting the forest", _forest],
+		["Scattering the wilds", _decor],
+		["Raising the camp", _static_camp],
+		["Waking the crew", _finish_build],
+	]
+
+
+func _finish_build() -> void:
+	process_mode = Node.PROCESS_MODE_INHERIT
+	apply_quality()
+	player = Player.new()
+	player.world = self
+	ChopTree.player = player
+	add_child(player)
+	player.global_position = SPAWN
+	cam = Camera3D.new()
+	cam.fov = 52.0
+	cam.keep_aspect = Camera3D.KEEP_WIDTH
+	cam.far = 120.0
+	add_child(cam)
+	_cam_target = player.global_position
+	_place_cam(1.0)
+	for i in 8:
+		var p := CPUParticles3D.new()
+		p.emitting = false
+		p.one_shot = true
+		p.explosiveness = 0.95
+		add_child(p)
+		_fx_pool.append(p)
+	_make_arrow()
+	_rebuild_all(false)
+	Game.state_changed.connect(_on_state_changed)
+
+
+# ------------------------------------------------------------------ environment
+
+func _env() -> void:
+	var we := WorldEnvironment.new()
+	var env := Environment.new()
+	var sky := Sky.new()
+	var sm := ProceduralSkyMaterial.new()
+	sm.sky_top_color = _tc("sky_top", Color(0.36, 0.55, 0.8))
+	sm.sky_horizon_color = _tc("sky_horizon", Color(0.8, 0.82, 0.78))
+	sm.ground_horizon_color = Color(0.55, 0.55, 0.45)
+	sm.ground_bottom_color = Color(0.2, 0.22, 0.15)
+	sm.sun_angle_max = 30.0
+	sky.sky_material = sm
+	env.sky = sky
+	env.background_mode = Environment.BG_SKY
+	env.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
+	env.ambient_light_energy = float(theme.get("ambient", 0.55))
+	env.reflected_light_source = Environment.REFLECTION_SOURCE_SKY
+	env.tonemap_mode = Environment.TONE_MAPPER_FILMIC
+	env.tonemap_exposure = 0.88
+	env.tonemap_white = 6.0
+	env.glow_enabled = not OS.has_feature("mobile")
+	env.glow_intensity = 0.35
+	env.glow_bloom = 0.04
+	env.glow_hdr_threshold = 1.1
+	env.fog_enabled = not LOW_END
+	env.fog_light_color = _tc("sky_horizon", Color(0.72, 0.78, 0.74)).lerp(Color(0.72, 0.78, 0.74), 0.4)
+	env.fog_density = 0.0025
+	env.fog_sky_affect = 0.3
+	env.adjustment_enabled = true
+	env.adjustment_saturation = 1.15
+	env.adjustment_contrast = 1.06
+	we.environment = env
+	add_child(we)
+	var sun := DirectionalLight3D.new()
+	sun.rotation_degrees = Vector3(float(theme.get("sun_pitch", -52)), -38, 0)
+	sun.light_color = _tc("sun", Color(1.0, 0.92, 0.8))
+	sun.light_energy = float(theme.get("sun_energy", 1.45))
+	sun.shadow_enabled = not LOW_END
+	sun.shadow_opacity = 0.85
+	sun.shadow_blur = 1.2
+	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_ORTHOGONAL
+	sun.directional_shadow_max_distance = 22.0 if OS.has_feature("mobile") else 32.0
+	add_child(sun)
+
+
+func _ground() -> void:
+	var img := Image.create(256, 256, false, Image.FORMAT_L8)
+	for y in 256:
+		for x in 256:
+			var wx := -40.0 + (x + 0.5) * 80.0 / 256.0
+			var wz := -40.0 + (y + 0.5) * 80.0 / 256.0
+			var v := 0.0
+			# camp clearing
+			var cx := (wx - 1.2) / 8.6
+			var cz := (wz - 3.0) / 7.2
+			v = maxf(v, 1.0 - sqrt(cx * cx + cz * cz))
+			# road
+			v = maxf(v, 1.0 - absf(wz - ROAD_Z) / 1.8)
+			# path to truck
+			v = maxf(v, _seg(wx, wz, Vector2(-1, 2), Vector2(-7, 3.4), 1.3))
+			# trail into the forest
+			v = maxf(v, _seg(wx, wz, Vector2(-0.5, -2), Vector2(-1.5, -12), 1.1) * 0.8)
+			v = maxf(v, _seg(wx, wz, Vector2(1.5, 1), Vector2(6.3, 3.4), 1.0))
+			img.set_pixel(x, y, Color(clampf(v * 1.8, 0, 1), 0, 0))
+	var mask := ImageTexture.create_from_image(img)
+	var mat := Art.shader_mat("res://shaders/ground.gdshader")
+	mat.set_shader_parameter("grass_alb", Art.tex("res://assets/textures/leafy_grass_diff.jpg"))
+	if not LOW_END:
+		mat.set_shader_parameter("grass_nor", Art.tex("res://assets/textures/leafy_grass_nor.jpg"))
+	mat.set_shader_parameter("dirt_alb", Art.tex("res://assets/textures/forrest_ground_01_diff.jpg"))
+	if not LOW_END:
+		mat.set_shader_parameter("dirt_nor", Art.tex("res://assets/textures/forrest_ground_01_nor.jpg"))
+	mat.set_shader_parameter("mask_tex", mask)
+	mat.set_shader_parameter("noise_tex", Art.noise())
+	mat.set_shader_parameter("lite", LOW_END)
+	mat.set_shader_parameter("grass_tint", _tc("grass", Color(0.80, 1.0, 0.55)))
+	mat.set_shader_parameter("dirt_tint", _tc("dirt", Color(1.05, 0.97, 0.9)))
+	var mi := MeshInstance3D.new()
+	var pm := PlaneMesh.new()
+	pm.size = Vector2(80, 80)
+	pm.subdivide_width = 4
+	pm.subdivide_depth = 4
+	mi.mesh = pm
+	mi.material_override = mat
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(mi)
+	var sb := StaticBody3D.new()
+	var cs := CollisionShape3D.new()
+	var ws := WorldBoundaryShape3D.new()
+	cs.shape = ws
+	sb.add_child(cs)
+	add_child(sb)
+	if theme.get("water", false):
+		_lake()
+	# invisible walls keep the player in the play area
+	for w in [[Vector3(0, 1, -27), Vector3(40, 2, 1)], [Vector3(0, 1, 14.5), Vector3(40, 2, 1)],
+			[Vector3(-15.5, 1, 0), Vector3(1, 2, 60)], [Vector3(15.5, 1, 0), Vector3(1, 2, 60)]]:
+		_collider(w[0], w[1])
+
+
+## Lakeside chapter: a lake along the east edge with a small dock.
+func _lake() -> void:
+	var w := MeshInstance3D.new()
+	var pm := PlaneMesh.new()
+	pm.size = Vector2(26, 60)
+	w.mesh = pm
+	var m := StandardMaterial3D.new()
+	m.albedo_color = Color(0.12, 0.32, 0.42)
+	m.roughness = 0.08
+	m.metallic = 0.35
+	m.metallic_specular = 0.8
+	w.material_override = m
+	w.position = Vector3(29.5, 0.04, -4)
+	w.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(w)
+	var shore := MeshInstance3D.new()
+	var sp := PlaneMesh.new()
+	sp.size = Vector2(1.6, 60)
+	shore.mesh = sp
+	shore.material_override = Art.paint(Color(0.62, 0.55, 0.42), 0.95)
+	shore.position = Vector3(16.3, 0.03, -4)
+	add_child(shore)
+	var dock := Art.box(Vector3(5.0, 0.12, 1.4), Art.plank_mat(), Vector3(18.5, 0.25, 4.0), self)
+	dock.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+	for x in [16.5, 18.5, 20.5]:
+		for z in [3.4, 4.6]:
+			Art.cylinder(0.07, 0.6, Art.pbr("bark_brown_02"), Vector3(x, 0.0, z), self, 8)
+
+
+func _seg(x: float, z: float, a: Vector2, b: Vector2, w: float) -> float:
+	var p := Vector2(x, z)
+	var ab := b - a
+	var t := clampf((p - a).dot(ab) / ab.length_squared(), 0.0, 1.0)
+	return 1.0 - (p - (a + ab * t)).length() / w
+
+
+func _collider(pos: Vector3, size: Vector3, rot_y := 0.0) -> void:
+	var sb := StaticBody3D.new()
+	var cs := CollisionShape3D.new()
+	var bs := BoxShape3D.new()
+	bs.size = size
+	cs.shape = bs
+	sb.add_child(cs)
+	sb.position = pos
+	sb.rotation.y = rot_y
+	add_child(sb)
+
+
+func _forest() -> void:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 42
+	var cfg: Dictionary = Game.cfg.tree
+	var z := -6.2
+	var row := 0
+	while z > -25.0:
+		var x := -13.0 + (1.15 if row % 2 == 1 else 0.0)
+		while x < 13.5 and true:
+			var p := Vector3(x + rng.randf_range(-0.5, 0.5), 0, z + rng.randf_range(-0.45, 0.45))
+			if not (absf(p.x + 1.0) < 1.2 and p.z > -12.0):   # keep the trail open
+				var t := ChopTree.new()
+				t.setup(rng.randi() % 4, int(cfg.hp), float(cfg.regrow))
+				add_child(t)
+				t.position = p
+				trees.append(t)
+			x += 2.75
+		z -= 2.5
+		row += 1
+	_build_tree_batch()
+
+
+func _decor() -> void:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 7
+	# edge forest (not choppable), batched per mesh
+	var groups := {}
+	for i in (36 if LOW_END else 70):
+		var p: Vector3
+		var side := i % 4
+		match side:
+			0: p = Vector3(rng.randf_range(-24, -15.8), 0, rng.randf_range(-30, 16))
+			1: p = Vector3(rng.randf_range(15.8, 24), 0, rng.randf_range(-30, 16)) if not theme.get("water", false) else Vector3(rng.randf_range(-24, -15.8), 0, rng.randf_range(-30, 16))
+			2: p = Vector3(rng.randf_range(-16, 16), 0, rng.randf_range(-33, -26))
+			_: p = Vector3(rng.randf_range(-22, 22), 0, rng.randf_range(14.6, 22))
+		var mesh: Mesh = Art.broadleaf_mesh(rng.randi() % 3) if rng.randf() < 0.45 else Art.pine_mesh(rng.randi() % 4)
+		var xf := Transform3D(Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3.ONE * rng.randf_range(1.1, 1.7)), p)
+		# one MultiMesh per (mesh, side of the map) so sides off screen are culled
+		var gk := [mesh, side]
+		if not groups.has(gk):
+			groups[gk] = []
+		groups[gk].append(xf)
+	for gk in groups:
+		var mm := MultiMesh.new()
+		mm.transform_format = MultiMesh.TRANSFORM_3D
+		mm.mesh = gk[0]
+		mm.instance_count = groups[gk].size()
+		for k in groups[gk].size():
+			mm.set_instance_transform(k, groups[gk][k])
+		var mmi := MultiMeshInstance3D.new()
+		mmi.multimesh = mm
+		mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		mmi.add_to_group("edge_forest")
+		add_child(mmi)
+	# rocks, ferns, grass
+	var spots := [[Vector3(-5.5, 0, -3.5), "rock_moss_set_01", 1.0], [Vector3(8.5, 0, 0.5), "rock_moss_set_01", 1.3],
+		[Vector3(-12, 0, 8), "rock_moss_set_01", 1.6], [Vector3(10, 0, 9.5), "dead_tree_trunk", 1.0],
+		[Vector3(-6.5, 0, 8.5), "dead_tree_trunk", 0.9]]
+	for s in spots:
+		var m := Art.model(s[1])
+		m.position = s[0]
+		m.scale = Vector3.ONE * s[2] * (0.45 if s[1] == "rock_moss_set_01" else 1.0)
+		m.rotation.y = rng.randf() * TAU
+		add_child(m)
+	var plants := {"fern_02": [], "grass_medium_01": []}
+	for i in (24 if LOW_END else 46):
+		var p := Vector3(rng.randf_range(-15, 15), 0, rng.randf_range(-26, 14))
+		if _near_camp(p):
+			continue
+		var key := "fern_02" if rng.randf() < 0.5 else "grass_medium_01"
+		plants[key].append(Transform3D(Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3.ONE * rng.randf_range(0.8, 1.3)), p))
+	for key in plants:
+		_scatter_model(key, plants[key])
+
+
+## Batches every mesh of a model into MultiMeshes: one draw per sub-mesh for all copies.
+func _scatter_model(name: String, xfs: Array) -> void:
+	if xfs.is_empty():
+		return
+	var m := Art.model(name)
+	var parts: Array = []
+	var stack: Array = [[m, Transform3D.IDENTITY]]
+	while not stack.is_empty():
+		var it: Array = stack.pop_back()
+		var n: Node3D = it[0]
+		var xf: Transform3D = it[1]
+		for c in n.get_children():
+			if c is Node3D:
+				var cx: Transform3D = xf * c.transform
+				if c is MeshInstance3D and c.mesh:
+					parts.append([c.mesh, cx])
+				stack.append([c, cx])
+	for part in parts:
+		var mm := MultiMesh.new()
+		mm.transform_format = MultiMesh.TRANSFORM_3D
+		mm.mesh = part[0]
+		mm.instance_count = xfs.size()
+		for k in xfs.size():
+			mm.set_instance_transform(k, xfs[k] * part[1])
+		var mmi := MultiMeshInstance3D.new()
+		mmi.multimesh = mm
+		mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		mmi.add_to_group("scatter")
+		add_child(mmi)
+	m.free()
+
+
+## Forest batching: one MultiMesh per pine variant draws every idle standing tree (1 draw instead of ~60).
+var _tree_mm: Dictionary = {}
+
+
+func _build_tree_batch() -> void:
+	# one MultiMesh per (variant, depth band) so bands off screen are culled
+	var by_variant := {}
+	for t in trees:
+		var key := Vector2i(t.variant, int(floor((-t.position.z - 6.0) / 6.5)))
+		if not by_variant.has(key):
+			by_variant[key] = []
+		by_variant[key].append(t)
+	for v in by_variant:
+		var mm := MultiMesh.new()
+		mm.transform_format = MultiMesh.TRANSFORM_3D
+		mm.mesh = Art.pine_mesh(v.x)
+		mm.instance_count = by_variant[v].size()
+		var mmi := MultiMeshInstance3D.new()
+		mmi.multimesh = mm
+		mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF if LOW_END else GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+		add_child(mmi)
+		_tree_mm[v] = mm
+		var i := 0
+		for t in by_variant[v]:
+			t.batch_key = v
+			t.batch_idx = i
+			t.batched = false
+			mm.set_instance_transform(i, Transform3D(Basis.from_scale(Vector3.ZERO), Vector3.ZERO))
+			i += 1
+
+
+func _batch_tree(t: ChopTree, want: bool) -> void:
+	if t.batch_idx < 0 or want == t.batched or not _tree_mm.has(t.batch_key):
+		return
+	t.batched = want
+	t.mesh.visible = not want
+	var mm: MultiMesh = _tree_mm[t.batch_key]
+	mm.set_instance_transform(t.batch_idx, global_transform.affine_inverse() * t.mesh.global_transform if want else Transform3D(Basis.from_scale(Vector3.ZERO), Vector3.ZERO))
+
+
+## Cheap fake firelight for phones: one additive quad on the ground, no extra light pass.
+func _glow_decal(p: Vector3) -> Node3D:
+	var mi := MeshInstance3D.new()
+	var q := PlaneMesh.new()
+	q.size = Vector2(6.5, 6.5)
+	mi.mesh = q
+	var g := Gradient.new()
+	g.set_color(0, Color(1.0, 0.62, 0.25, 0.55))
+	g.set_color(1, Color(1.0, 0.45, 0.1, 0.0))
+	var gt := GradientTexture2D.new()
+	gt.gradient = g
+	gt.fill = GradientTexture2D.FILL_RADIAL
+	gt.fill_from = Vector2(0.5, 0.5)
+	gt.fill_to = Vector2(1.0, 0.5)
+	gt.width = 128
+	gt.height = 128
+	var m := StandardMaterial3D.new()
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	m.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	m.albedo_texture = gt
+	m.no_depth_test = false
+	mi.material_override = m
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	mi.position = p + Vector3(0, 0.03, 0)
+	return mi
+
+
+func _shadows_off(n: Node) -> void:
+	if n is GeometryInstance3D:
+		n.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	for c in n.get_children():
+		_shadows_off(c)
+
+
+func _near_camp(p: Vector3) -> bool:
+	return (p.x > -9 and p.x < 9 and p.z > -4 and p.z < 13) or absf(p.z - ROAD_Z) < 2.0
+
+
+func _static_camp() -> void:
+	var truck := Art.truck()
+	truck.position = TRUCK_POS
+	truck.rotation.y = -0.25
+	add_child(truck)
+	_collider(TRUCK_POS + Vector3(0, 1, 0), Vector3(2.2, 2, 5.4), -0.25)
+	var load_pile := Stack.new().setup("log", Stack.Layout.PILE)
+	truck.add_child(load_pile)
+	load_pile.position = Vector3(0, 0.82, -0.7)
+	load_pile.rotation.y = PI / 2
+	load_pile.set_count(14)
+	sell_zone = _zone("sell", "sell", SELL_POS, Vector2(1.9, 1.9), Color("#FFD978"), "SELL", "res://assets/icons/truck.svg")
+	var nxt: String = Game.chapters[Game.venue + 1].name if Game.venue + 1 < Game.chapters.size() else "NEW EMPIRE"
+	var arch := Art.arch(nxt.to_upper())
+	arch.position = GATE_POS
+	arch.rotation.y = PI / 2
+	add_child(arch)
+	# lanterns and props around the camp
+	for p in [Vector3(-4.2, 0, 1.2), Vector3(3.8, 0, 0.2), Vector3(-1.2, 0, 10.2), Vector3(3.6, 0, 10.2)]:
+		var post := Art.cylinder(0.06, 1.6, Art.pbr("bark_brown_02"), p + Vector3(0, 0.8, 0), self, 8)
+		post.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+		var lan := Art.model("wooden_lantern_01")
+		lan.position = p + Vector3(0, 1.6, 0)
+		add_child(lan)
+	var crates := Art.model("wooden_crate_01")
+	crates.position = Vector3(-4.0, 0, -2.6)
+	add_child(crates)
+	var barrels := Art.model("wooden_barrels_01")
+	barrels.position = Vector3(-6.8, 0, 0.6)
+	add_child(barrels)
+
+
+func _zone(id: String, kind: String, pos: Vector3, size: Vector2, color: Color, text := "", icon := "", dashed := false) -> Zone:
+	var z := Zone.new()
+	add_child(z)
+	z.setup(id, kind, size, color, text, icon, dashed)
+	z.position = pos
+	zones.append(z)
+	return z
+
+
+# ------------------------------------------------------------------ build state
+
+func _on_state_changed() -> void:
+	_rebuild_all(true)
+
+
+func _rebuild_all(animate: bool) -> void:
+	for b in Game.cfg.builds:
+		var id: String = b.id
+		if Game.built.has(id) and not buildings.has(id) and id != "gate":
+			_spawn_building(id, animate)
+		if pads.has(id) and (Game.built.has(id) or not Game.build_available(id)):
+			if Game.built.has(id) or id != "gate":
+				zones.erase(pads[id])
+				pads[id].queue_free()
+				pads.erase(id)
+		if not pads.has(id) and Game.build_available(id):
+			_spawn_pad(id, animate)
+	_sync_workers()
+
+
+func _spawn_pad(id: String, animate: bool) -> void:
+	var b := Game.build_def(id)
+	var z: Zone
+	if id == "gate":
+		z = _zone(id, "gate", PADS[id], Vector2(2.4, 2.4), Color("#8EE07A"), "NEXT", "res://assets/icons/gate.svg", true)
+	else:
+		var left := int(b.cost) - int(Game.pad_paid.get(id, 0))
+		z = _zone(id, "build", PADS[id], Vector2(2.0, 2.0), Color("#FFD978"), UI.fmt(left), "res://assets/icons/coin.svg", true)
+		z.set_progress(float(Game.pad_paid.get(id, 0)) / float(b.cost))
+	var name_l := Label3D.new()
+	name_l.text = String(b.name).to_upper()
+	name_l.font = UI.font_bold()
+	name_l.font_size = 64
+	name_l.pixel_size = 0.0045
+	name_l.outline_size = 14
+	name_l.outline_modulate = Color(0.08, 0.05, 0.02, 0.9)
+	name_l.rotation.x = -PI / 2
+	name_l.position = Vector3(0, 0.05, z.size.y * 0.5 + 0.32)
+	name_l.modulate = Color("#FFE7A8")
+	z.add_child(name_l)
+	pads[id] = z
+	if animate:
+		z.scale = Vector3.ONE * 0.01
+		z.create_tween().tween_property(z, "scale", Vector3.ONE, 0.45).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+
+
+func _spawn_building(id: String, animate: bool) -> void:
+	var root := Node3D.new()
+	add_child(root)
+	buildings[id] = root
+	match id:
+		"campfire":
+			_make_fire(0, root)
+			var pallet := Art.box(Vector3(1.3, 0.1, 1.3), Art.plank_mat(), PILE_POS + Vector3(0, 0.05, 0), root)
+			pallet.name = "Pallet"
+			pile = Stack.new().setup("log", Stack.Layout.PILE)
+			root.add_child(pile)
+			pile.position = PILE_POS + Vector3(0, 0.1, 0)
+			pile.set_count(Game.woodpile)
+			pile_zone = _zone("pile", "pile", PILE_POS + Vector3(0, 0, 1.25), Vector2(1.9, 1.1), Color("#FFD978"), "", "res://assets/icons/log.svg")
+			var rk := Art.rack()
+			rk.position = RACK_POS
+			root.add_child(rk)
+			_collider(RACK_POS + Vector3(0, 0.45, 0), Vector3(1.5, 0.9, 0.6))
+			rack_stack = Stack.new().setup("dish", Stack.Layout.RACK)
+			rack_stack.position = RACK_POS + Vector3(0, 0.03, 0)
+			root.add_child(rack_stack)
+			rack_stack.set_count(Game.rack)
+			rack_zone = _zone("rack", "rack", RACK_POS + Vector3(0, 0, 0.95), Vector2(1.7, 1.0), Color("#FFD978"), "", "res://assets/icons/dish.svg")
+			var ct := Art.counter()
+			ct.position = COUNTER_POS
+			root.add_child(ct)
+			_collider(COUNTER_POS + Vector3(0, 0.5, 0), Vector3(2.8, 1.0, 0.8))
+			var lan := Art.model("wooden_lantern_01")
+			lan.position = COUNTER_POS + Vector3(1.15, 1.03, 0.1)
+			root.add_child(lan)
+			counter_stack = Stack.new().setup("dish", Stack.Layout.COUNTER)
+			counter_stack.position = COUNTER_POS + Vector3(-0.1, 0, 0)
+			root.add_child(counter_stack)
+			serve_zone = _zone("serve", "serve", COUNTER_POS + Vector3(0, 0, -0.95), Vector2(2.6, 1.0), Color("#FFD978"), "SERVE")
+			coin_stack = Stack.new().setup("coin", Stack.Layout.COINS, 54)
+			coin_stack.position = COIN_POS
+			root.add_child(coin_stack)
+			coin_stack.set_count(_coin_visuals(Game.counter_coins))
+			coin_zone = _zone("coins", "coins", COIN_POS, Vector2(1.3, 1.3), Color("#FFD978"), "")
+			var bench := Art.model("wooden_stool_01")
+			bench.position = FIRE_POS[0] + Vector3(-1.1, 0, 0.4)
+			root.add_child(bench)
+		"fire_2":
+			_make_fire(1, root)
+		"tables_1", "tables_2":
+			for c in TABLES[id]:
+				var t := Art.model("wooden_picnic_table")
+				t.position = c
+				t.scale = Vector3.ONE * TABLE_SCALE
+				root.add_child(t)
+				_collider(c + Vector3(0, 0.4, 0), Vector3(1.9, 0.8, 2.5))
+				for side in [-1.0, 1.0]:
+					for end in [-1.0, 1.0]:
+						var plate := Stack.new().setup("dish", Stack.Layout.TABLE)
+						plate.position = c + Vector3(side * 0.28, 0.645, end * 0.62)
+						root.add_child(plate)
+						seats.append({"pos": c + Vector3(side * 0.74, -0.06, end * 0.62), "side": side,
+							"center": c, "by": null, "plate": plate})
+		"shop":
+			var cab := Art.cabin(2.6, 2.2, _tc("wall", Color(1.35, 1.1, 0.85)))
+			cab.position = SHOP_POS
+			cab.rotation.y = 0.0
+			root.add_child(cab)
+			_collider(SHOP_POS + Vector3(0, 1, 0), Vector3(2.7, 2, 2.3))
+			var crate := Art.model("wooden_crate_01")
+			crate.position = SHOP_POS + Vector3(-1.9, 0, 0.9)
+			root.add_child(crate)
+			var axe := Art.model("wooden_axe_02")
+			axe.position = SHOP_POS + Vector3(-1.9, 0.62, 0.9)
+			axe.rotation_degrees = Vector3(0, 30, 75)
+			root.add_child(axe)
+			_zone("shop", "shop", PADS.shop, Vector2(1.9, 1.6), Color("#8EC9FF"), "TOOLS", "res://assets/icons/hammer.svg")
+		"crew_hut":
+			var cab2 := Art.cabin(3.0, 2.4, _tc("wall", Color(1.25, 1.0, 0.78)).darkened(0.08))
+			cab2.position = CREW_POS
+			cab2.rotation.y = -PI / 2
+			root.add_child(cab2)
+			_collider(CREW_POS + Vector3(0, 1, 0), Vector3(2.5, 2, 3.1))
+			var st := Art.model("wooden_stool_01")
+			st.position = CREW_POS + Vector3(-1.6, 0, 1.4)
+			root.add_child(st)
+			_zone("crew", "crew", PADS.crew_hut, Vector2(1.9, 1.6), Color("#8EC9FF"), "CREW", "res://assets/icons/crew.svg")
+	if animate:
+		_push_player_clear(PADS.get(id, root.global_position))
+		Sfx.play("build")
+		fx_dust(PADS.get(id, root.global_position))
+		for c in root.get_children():
+			if c is Node3D and not (c is Stack):
+				var s: Vector3 = c.scale
+				c.scale = s * 0.01
+				c.create_tween().tween_property(c, "scale", s, 0.5).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+		Game.toast.emit(String(Game.build_def(id).name) + " built!")
+
+
+func _push_player_clear(pad: Vector3) -> void:
+	# a new building can appear on top of the player: hop them to the side of it
+	if player.global_position.distance_to(pad) < 1.6:
+		var dest := pad + Vector3(0, 0, 1.7)
+		var tw := player.create_tween()
+		tw.tween_property(player, "global_position", dest, 0.25).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+
+
+func _make_fire(i: int, root: Node3D) -> void:
+	var p: Vector3 = FIRE_POS[i]
+	var kind: String = Game.chapter().cooker
+	var flame_y := 0.2
+	if kind == "firepit":
+		var pit := Art.model("stone_fire_pit")
+		pit.position = p
+		pit.scale = Vector3.ONE * 0.9
+		root.add_child(pit)
+		var pot := Art.model("pot_enamel_01")
+		pot.position = p + Vector3(0, 0.22, 0)
+		pot.scale = Vector3.ONE * 1.6
+		root.add_child(pot)
+		for k in 3:
+			var lg := MeshInstance3D.new()
+			lg.mesh = Art.log_mesh()
+			lg.position = p + Vector3(0, 0.12, 0)
+			lg.rotation = Vector3(0, k * TAU / 3.0, 0.25)
+			root.add_child(lg)
+	else:
+		var ck := Art.cooker(kind)
+		ck.position = p
+		root.add_child(ck)
+		flame_y = float(ck.get_meta("flame_y", 0.6))
+	_collider(p + Vector3(0, 0.3, 0), Vector3(1.2, 0.6, 1.2))
+	var flames := CPUParticles3D.new()
+	var qm := QuadMesh.new()
+	qm.size = Vector2(0.45, 0.45)
+	var fm := StandardMaterial3D.new()
+	fm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	fm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	fm.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	fm.billboard_mode = BaseMaterial3D.BILLBOARD_PARTICLES
+	fm.vertex_color_use_as_albedo = true
+	fm.albedo_texture = _soft_dot()
+	qm.material = fm
+	flames.mesh = qm
+	flames.amount = 26
+	flames.lifetime = 0.8
+	flames.position = p + Vector3(0, flame_y, 0)
+	flames.emission_shape = CPUParticles3D.EMISSION_SHAPE_SPHERE
+	flames.emission_sphere_radius = 0.18
+	flames.direction = Vector3.UP
+	flames.spread = 12.0
+	flames.gravity = Vector3(0, 1.4, 0)
+	flames.initial_velocity_min = 0.4
+	flames.initial_velocity_max = 0.9
+	flames.scale_amount_min = 0.6
+	flames.scale_amount_max = 1.2
+	var ramp := Gradient.new()
+	ramp.set_color(0, Color(1.0, 0.85, 0.4, 0.9))
+	ramp.set_color(1, Color(0.9, 0.2, 0.05, 0.0))
+	ramp.add_point(0.4, Color(1.0, 0.5, 0.1, 0.75))
+	flames.color_ramp = ramp
+	var curve := Curve.new()
+	curve.add_point(Vector2(0, 0.6))
+	curve.add_point(Vector2(0.3, 1.0))
+	curve.add_point(Vector2(1, 0.1))
+	flames.scale_amount_curve = curve
+	root.add_child(flames)
+	var light: Node3D
+	if LOW_END:
+		light = _glow_decal(p)
+	else:
+		var ol := OmniLight3D.new()
+		ol.light_color = Color(1.0, 0.6, 0.25)
+		ol.light_energy = 1.4
+		ol.omni_range = 4.0
+		ol.position = p + Vector3(0, 0.8, 0)
+		light = ol
+	root.add_child(light)
+	var ring := MeshInstance3D.new()
+	var rq := QuadMesh.new()
+	rq.size = Vector2(0.62, 0.62)
+	ring.mesh = rq
+	var rmat := Art.shader_mat("res://shaders/ring.gdshader")
+	ring.material_override = rmat
+	ring.position = p + Vector3(0, 1.75, 0)
+	ring.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	ring.visible = false
+	root.add_child(ring)
+	fires.append({"pos": p, "fuel": 0, "cooking": false, "t": 0.0, "ring": ring, "mat": rmat, "light": light, "flames": flames})
+
+
+func _soft_dot() -> Texture2D:
+	return Art._c("softdot", func():
+		var g := Gradient.new()
+		g.set_color(0, Color(1, 1, 1, 1))
+		g.set_color(1, Color(1, 1, 1, 0))
+		var gt := GradientTexture2D.new()
+		gt.gradient = g
+		gt.fill = GradientTexture2D.FILL_RADIAL
+		gt.fill_from = Vector2(0.5, 0.5)
+		gt.fill_to = Vector2(0.5, 0.0)
+		gt.width = 64
+		gt.height = 64
+		return gt)
+
+
+func _sync_workers() -> void:
+	var have := {"lumberjack": 0, "waiter": 0, "cook": 0}
+	for w in workers:
+		have[w.role] += 1
+	for role in have:
+		while have[role] < int(Game.crew[role]):
+			if role != "lumberjack" and not Game.built.has("campfire"):
+				break
+			var w := Worker.new().setup(self, role, have[role])
+			add_child(w)
+			w.global_position = CREW_POS + Vector3(-1.8, 0, 0.5 * have[role]) if Game.built.has("crew_hut") else SPAWN
+			workers.append(w)
+			have[role] += 1
+
+
+# ------------------------------------------------------------------ queries used by agents
+
+func trees_near(p: Vector3, r: float, n: int) -> Array:
+	var out: Array = []
+	var best: Array = []
+	for t in trees:
+		if not t.alive:
+			continue
+		var d := Vector2(t.global_position.x - p.x, t.global_position.z - p.z).length()
+		if d <= r and (t.reserved_by == null or not is_instance_valid(t.reserved_by)):
+			best.append([d, t])
+	best.sort_custom(func(a, b): return a[0] < b[0])
+	for i in mini(n, best.size()):
+		out.append(best[i][1])
+	return out
+
+
+func has_free_tree() -> bool:
+	for t in trees:
+		if t.alive and t.reserved_by == null:
+			return true
+	return false
+
+
+func reserve_tree(by: Node, p: Vector3) -> ChopTree:
+	var best: ChopTree = null
+	var bd := INF
+	for t in trees:
+		if not t.alive or (t.reserved_by != null and is_instance_valid(t.reserved_by)):
+			continue
+		if player.global_position.distance_to(t.global_position) < 2.5:
+			continue
+		var d := p.distance_squared_to(t.global_position)
+		if d < bd:
+			bd = d
+			best = t
+	if best:
+		best.reserved_by = by
+	return best
+
+
+func fire_positions() -> Array:
+	var out := []
+	for f in fires:
+		out.append(f.pos)
+	return out
+
+
+func fire_busy(i: int) -> bool:
+	return i < fires.size() and fires[i].cooking
+
+
+func pile_full() -> bool:
+	return Game.woodpile >= int(Game.cfg.woodpile_cap)
+
+
+## Sells one log from a stack at the truck (player or lumberjack). Returns false when empty.
+func sell_log_from(s: Stack, by: Node3D) -> bool:
+	if s.count() == 0:
+		return false
+	var from := s.take()
+	Stack.fly_free(self, "log", from, TRUCK_POS + Vector3(0, 1.6, -0.6), 0.35)
+	var price := int(Game.cfg.log_sell_price)
+	Game.add_coins(price)
+	Game.stats.sold += 1
+	if by == player:
+		Game.job_progress("sell")
+	Sfx.play("coin", -8.0 if by == player else -14.0, 1.0, 0.05)
+	float_text.emit("+%d" % price, by.global_position + Vector3(randf_range(-0.3, 0.3), 2.3, 0), UI.GOLD_LIGHT)
+	return true
+
+
+func pile_put_from(s: Stack) -> bool:
+	if pile == null or Game.woodpile >= int(Game.cfg.woodpile_cap) or s.count() == 0:
+		return false
+	var from := s.take()
+	pile.receive(from, 0.28)
+	Game.woodpile += 1
+	Sfx.play("clack", -8.0, 1.0, 0.04)
+	return true
+
+
+func rack_take_to(s: Stack) -> bool:
+	if rack_stack == null or Game.rack <= 0:
+		return false
+	var from := rack_stack.take()
+	Game.rack -= 1
+	s.receive(from, 0.22)
+	Sfx.play("pop", -10.0, 1.2)
+	return true
+
+
+func counter_count() -> int:
+	return counter_stack.count() if counter_stack else 0
+
+
+func counter_put_from(s: Stack) -> bool:
+	if counter_stack == null or counter_stack.count() >= 8 or s.count() == 0:
+		return false
+	counter_stack.receive(s.take(), 0.22)
+	Sfx.play("pop", -10.0, 1.0)
+	return true
+
+
+func counter_give_to(s: Stack) -> void:
+	if counter_stack and counter_stack.count() > 0:
+		s.receive(counter_stack.take(), 0.25)
+
+
+func _coin_visuals(amount: int) -> int:
+	return mini(54, int(ceil(amount / 5.0)))
+
+
+func customer_paid(c: Node3D, amount: int, score: float) -> void:
+	Game.counter_coins += amount
+	Game.served += 1
+	Game.vserved += 1
+	Game.stats.served += 1
+	Game.add_rating(score)
+	Game.job_progress("serve")
+	var want := _coin_visuals(Game.counter_coins)
+	var from := c.global_position + Vector3(0, 1.2, 0)
+	while coin_stack.count() < want:
+		coin_stack.receive(from, 0.35 + coin_stack.count() % 5 * 0.04)
+	Sfx.play("cash", -4.0)
+	float_text.emit("+%d" % amount, c.global_position + Vector3(0, 2.4, 0), UI.GOLD_LIGHT)
+
+
+func customer_angry(c: Node3D) -> void:
+	Game.add_rating(1.0)
+	float_text.emit("TOO SLOW!", c.global_position + Vector3(0, 2.4, 0), UI.RED)
+
+
+func queue_leave(c: Node) -> void:
+	queue.erase(c)
+	_reslot()
+
+
+func _reslot() -> void:
+	for i in queue.size():
+		queue[i].move_to_slot(i, _slot_pos(i))
+
+
+func _slot_pos(i: int) -> Vector3:
+	return COUNTER_POS + Vector3(-0.2, 0, 0.95 + i * 0.95)
+
+
+func take_seat(c: Node) -> int:
+	var free: Array = []
+	for i in seats.size():
+		if seats[i].by == null:
+			free.append(i)
+	if free.is_empty():
+		return -1
+	var i: int = free[randi() % free.size()]
+	seats[i].by = c
+	return i
+
+
+func path_to_seat(from: Vector3, i: int) -> Array:
+	var s: Dictionary = seats[i]
+	var approach := Vector3(s.center.x + s.side * 1.55, 0, s.pos.z)
+	var dir := 1.0 if s.center.x > from.x else -1.0
+	return [from + Vector3(dir * 1.7, 0, 0.4), Vector3(approach.x, 0, s.center.z + 1.9), approach]
+
+
+func seat_sit_pos(i: int) -> Vector3:
+	var s: Dictionary = seats[i]
+	return Vector3(s.pos.x + s.side * 0.12, -0.05, s.pos.z)
+
+
+func seat_table_center(i: int) -> Vector3:
+	return seats[i].center if i >= 0 else Vector3.ZERO
+
+
+func seat_food(i: int, hands: Stack) -> void:
+	var plate: Stack = seats[i].plate
+	while hands.count() > 0:
+		plate.receive(hands.take(), 0.25)
+
+
+func seat_done(i: int, paid: int) -> void:
+	var plate: Stack = seats[i].plate
+	plate.set_count(0)
+	seats[i].by = null
+	var tip := int(round(paid * float(Game.cfg.customers.seated_tip)))
+	if tip > 0:
+		Game.counter_coins += tip
+		var want := _coin_visuals(Game.counter_coins)
+		while coin_stack.count() < want:
+			coin_stack.receive(seats[i].pos + Vector3(0, 1, 0), 0.5)
+		float_text.emit("TIP +%d" % tip, seats[i].pos + Vector3(0, 2.2, 0), UI.GREEN)
+		Game.add_rating(5.0)
+
+
+func path_home(from: Vector3) -> Array:
+	var out: Array = []
+	for s in seats:
+		if Vector2(from.x - s.pos.x, from.z - s.pos.z).length() < 0.6:
+			out.append(Vector3(s.center.x + s.side * 1.55, 0, s.pos.z))
+			break
+	out.append(Vector3(out[0].x if out.size() > 0 else from.x + (2.0 if from.x < 2.0 else 0.0), 0, ROAD_Z - 0.6))
+	out.append(ROAD_EAST)
+	return out
+
+
+func on_tree_hit(t: ChopTree, logs: int, by: Node) -> void:
+	fx_chips(t.global_position + Vector3(0, 0.8, 0))
+	if not t.alive:
+		Game.stats.trees += 1
+		if by == player:
+			Game.job_progress("chop")
+			_shake = 0.25
+		Sfx.play("fall", -6.0 if by == player else -16.0)
+		fx_leaves(t.global_position + Vector3(0, 1.8, 0))
+	elif by != player and player.global_position.distance_to(t.global_position) < 9.0:
+		Sfx.play("chop", -18.0)
+	Game.stats.logs += logs
+
+
+# ------------------------------------------------------------------ main loop
+
+func _process(delta: float) -> void:
+	_zones_tick(delta)
+	_fires_tick(delta)
+	_customers_tick(delta)
+	_cam_tick(delta)
+	_obj_t -= delta
+	if _obj_t <= 0.0:
+		_obj_t = 0.25
+		_update_objective()
+	if arrow.visible:
+		arrow.position.y = objective.pos.y + 2.2 + sin(Time.get_ticks_msec() * 0.006) * 0.18
+		arrow.rotate_y(delta * 2.0)
+
+
+func _zones_tick(delta: float) -> void:
+	var pp := player.global_position
+	for z in zones.duplicate():
+		if not is_instance_valid(z):
+			continue
+		var inside: bool = z.contains(pp)
+		var was: bool = _inside.get(z, false)
+		if inside != was:
+			_inside[z] = inside
+			z.set_active(inside)
+			if not inside and _engaged.get(z, false):
+				_engaged[z] = false
+				zone_exited.emit(z.kind, z.id)
+		if not inside:
+			continue
+		# zones only work once the player stops on them — walking across never spends or opens anything
+		if not player.is_still():
+			z.tick = maxf(z.tick, 0.12)
+			continue
+		if not _engaged.get(z, false):
+			_engaged[z] = true
+			z.tick = 0.12
+			zone_entered.emit(z.kind, z.id)
+		z.tick -= delta
+		if z.tick <= 0.0:
+			_zone_action(z)
+
+
+func _zone_action(z: Zone) -> void:
+	match z.kind:
+		"sell":
+			z.tick = 0.07
+			sell_log_from(player.back, player)
+		"pile":
+			z.tick = 0.06
+			pile_put_from(player.back)
+		"rack":
+			z.tick = 0.12
+			if player.hands.count() < int(Game.cfg.player.carry_dishes):
+				rack_take_to(player.hands)
+		"serve":
+			z.tick = 0.12
+			counter_put_from(player.hands)
+		"coins":
+			z.tick = 0.04
+			if Game.counter_coins > 0:
+				var n := coin_stack.count()
+				var per := int(ceil(float(Game.counter_coins) / maxf(1.0, float(n))))
+				var amount := mini(per, Game.counter_coins)
+				Game.counter_coins -= amount
+				Game.add_coins(amount)
+				if n > 0:
+					Stack.fly_free(self, "coin", coin_stack.take(), player.global_position + Vector3(0, 1.4, 0), 0.25)
+				Sfx.play("coin", -6.0, 1.0 + randf() * 0.2, 0.05)
+		"build":
+			z.tick = 0.035
+			var b := Game.build_def(z.id)
+			var rate := maxi(1, int(ceil(float(b.cost) / 40.0)))
+			var moved := Game.pay_pad(z.id, rate)
+			if moved > 0:
+				if randf() < 0.5:
+					Stack.fly_free(self, "coin", player.global_position + Vector3(0, 1.3, 0), z.global_position, 0.25)
+					Sfx.play("coin", -12.0, 1.3, 0.06)
+				if is_instance_valid(z) and pads.has(z.id):
+					var paid := int(Game.pad_paid.get(z.id, 0))
+					z.set_text(UI.fmt(int(b.cost) - paid))
+					z.set_progress(float(paid) / float(b.cost))
+		_:
+			z.tick = 999.0
+
+
+func _fires_tick(delta: float) -> void:
+	var cap := int(Game.cfg.rack_cap)
+	var cooking := 0
+	for f in fires:
+		if f.cooking:
+			cooking += 1
+	for i in fires.size():
+		var f: Dictionary = fires[i]
+		var flick := sin(Time.get_ticks_msec() * 0.013 + i) * 0.25 + randf() * 0.15
+		if f.light is OmniLight3D:
+			f.light.light_energy = 1.2 + flick
+		else:
+			f.light.transparency = 0.15 - flick * 0.3
+		if f.cooking:
+			f.t -= delta
+			f.mat.set_shader_parameter("progress", 1.0 - f.t / Game.cook_time())
+			if f.t <= 0.0:
+				f.cooking = false
+				f.ring.visible = false
+				Game.rack += 1
+				rack_stack.receive(f.pos + Vector3(0, 0.8, 0), 0.4)
+				Sfx.play("pop", -12.0, 0.9)
+		elif (f.fuel > 0 or Game.woodpile > 0) and Game.rack + cooking < cap:
+			if f.fuel <= 0:
+				Game.woodpile -= 1
+				f.fuel = int(Game.cfg.dishes_per_log)
+				Stack.fly_free(self, "log", pile.take(), f.pos + Vector3(0, 0.3, 0), 0.4)
+			f.fuel -= 1
+			cooking += 1
+			f.cooking = true
+			f.t = Game.cook_time()
+			f.ring.visible = true
+		f.flames.scale = Vector3.ONE * (1.25 if f.cooking else 0.8)
+
+
+func _customers_tick(delta: float) -> void:
+	if not Game.built.has("campfire"):
+		return
+	var c: Dictionary = Game.cfg.customers
+	spawn_t -= delta
+	var max_q := max_queue()
+	var limit := max_q + seats.size() + 2
+	if spawn_t <= 0.0:
+		spawn_t = spawn_interval() * randf_range(0.75, 1.25)
+		if queue.size() < max_q and customers.size() < limit:
+			_spawn_customer()
+	customers = customers.filter(func(x): return is_instance_valid(x))
+
+
+## Demand grows with the whole business: tables, fires, kitchen upgrades, cooks and menu.
+## Rating still matters, but a dip slows guests by at most ~30% instead of halving them.
+func spawn_interval() -> float:
+	var c: Dictionary = Game.cfg.customers
+	var demand := 1.0 + Game.tables() * float(c.per_table_bonus)
+	demand += (fires.size() - 1) * 0.30
+	demand += int(Game.levels.get("fire", 0)) * 0.14
+	demand += int(Game.levels.get("menu", 0)) * 0.10
+	demand += int(Game.crew.get("cook", 0)) * 0.12
+	var rate_mult := lerpf(1.3, 0.85, clampf((Game.rating() - 3.0) / 2.0, 0.0, 1.0))
+	return float(c.interval) / demand * rate_mult
+
+
+## A second fire and kitchen upgrades let a longer line form at the counter.
+func max_queue() -> int:
+	return int(Game.cfg.customers.max_queue) + (fires.size() - 1) + int(int(Game.levels.get("fire", 0)) >= 2)
+
+
+func _spawn_customer() -> void:
+	cust_seed += 1
+	var cu := Customer.new().setup(self, cust_seed + randi() % 1000)
+	add_child(cu)
+	cu.global_position = ROAD_EAST + Vector3(0, 0, randf_range(-0.4, 0.4))
+	var i := queue.size()
+	queue.append(cu)
+	cu.slot = i
+	cu.go([Vector3(COUNTER_POS.x + 1.6, 0, ROAD_Z - 0.4), _slot_pos(i)])
+	customers.append(cu)
+
+
+func _place_cam(t: float) -> void:
+	var off := cam_off
+	var shake := Vector3(randf_range(-1, 1), randf_range(-1, 1), 0) * _shake * 0.25
+	cam.global_position = cam.global_position.lerp(_cam_target + off, t) + shake
+	cam.look_at(cam.global_position - off + Vector3(0, 0, 0), Vector3.UP)
+
+
+func _cam_tick(delta: float) -> void:
+	_cam_target = _cam_target.lerp(player.global_position + Vector3(0, 0, -0.8), clampf(delta * 5.0, 0.0, 1.0))
+	_shake = maxf(0.0, _shake - delta)
+	_place_cam(clampf(delta * 8.0, 0.0, 1.0))
+	# see-through foliage around the player
+	var head := player.global_position + Vector3(0, 1.0, 0)
+	if not cam.is_position_behind(head):
+		var sp := cam.unproject_position(head) / get_viewport().get_visible_rect().size
+		var vs := get_viewport().get_visible_rect().size
+		var cut := Art.foliage_mat(Color(0.04, 0.11, 0.06), Color(0.36, 0.55, 0.24), true)
+		var ppos := player.global_position
+		var chopping: Array = player._targets
+		for t in trees:
+			var d: Vector3 = t.global_position - ppos
+			var covers: bool = t.alive and d.z > 0.9 and d.z < 4.8 and absf(d.x) < 1.9 and not chopping.has(t)
+			var want: Material = cut if covers else null
+			if t.mesh.material_override != want:
+				t.mesh.material_override = want
+			_batch_tree(t, t.alive and not covers and t._shake <= 0.0 and not t.growing)
+		for m in [cut]:
+			m.set_shader_parameter("player_screen", sp)
+			m.set_shader_parameter("player_dist", cam.global_position.distance_to(head))
+			m.set_shader_parameter("aspect", vs.x / vs.y)
+
+
+# ------------------------------------------------------------------ objective arrow
+
+func _make_arrow() -> void:
+	arrow = Node3D.new()
+	var spr := Sprite3D.new()
+	spr.texture = load("res://assets/icons/arrow.svg")
+	spr.pixel_size = 0.006
+	spr.no_depth_test = true
+	spr.render_priority = 6
+	spr.shaded = false
+	arrow.add_child(spr)
+	var spr2 := spr.duplicate()
+	spr2.rotation.y = PI / 2
+	arrow.add_child(spr2)
+	add_child(arrow)
+
+
+func _update_objective() -> void:
+	var o := _compute_objective()
+	objective = o
+	var show: bool = o.pos != Vector3.ZERO and player.global_position.distance_to(o.pos) > 1.6
+	arrow.visible = show
+	if show:
+		arrow.position = Vector3(o.pos.x, arrow.position.y, o.pos.z)
+
+
+func _nearest_tree_pos() -> Vector3:
+	var best := Vector3.ZERO
+	var bd := INF
+	for t in trees:
+		if t.alive:
+			var d := player.global_position.distance_squared_to(t.global_position)
+			if d < bd:
+				bd = d
+				best = t.global_position
+	return best
+
+
+func _compute_objective() -> Dictionary:
+	var p := player
+	var cap := Game.bag_cap()
+	if Game.chapter_done and Game.venue + 1 < Game.unlocked and (Game.venue + 1 >= Game.venues.size() or Game.venues[Game.venue + 1].is_empty()):
+		return {"text": "Open the MAP: travel to " + String(Game.chapters[Game.venue + 1].name), "pos": Vector3.ZERO}
+	if not Game.built.has("campfire"):
+		var cost := int(Game.build_def("campfire").cost) - int(Game.pad_paid.get("campfire", 0))
+		if Game.coins >= cost or (Game.coins > 0 and p.back.count() == 0):
+			return {"text": "Build the " + String(Game.build_def("campfire").name).to_lower(), "pos": PADS.campfire}
+		if p.back.count() >= cap or (p.back.count() > 0 and p.back.count() * int(Game.cfg.log_sell_price) + Game.coins >= cost):
+			return {"text": "Sell logs at the truck", "pos": SELL_POS}
+		return {"text": "Chop trees (stand next to one)", "pos": _nearest_tree_pos()}
+	# affordable build pad first
+	for b in Game.cfg.builds:
+		if pads.has(b.id) and b.id != "gate":
+			var left := int(b.cost) - int(Game.pad_paid.get(b.id, 0))
+			if Game.coins >= left:
+				return {"text": "Build: " + String(b.name), "pos": PADS[b.id]}
+	if pads.has("gate") and Game.gate_ready():
+		return {"text": "Unlock " + String(Game.build_def("gate").name) + "!", "pos": PADS.gate}
+	if p.hands.count() > 0:
+		return {"text": "Serve the guests", "pos": serve_zone.global_position}
+	var hungry := queue.size() > 0 and counter_count() == 0
+	if Game.rack > 0 and Game.crew.waiter == 0 and (hungry or Game.rack >= int(Game.cfg.rack_cap)):
+		return {"text": "Carry food to the counter", "pos": rack_zone.global_position}
+	var fires_idle := Game.woodpile == 0 and Game.rack == 0 and not fires.any(func(f): return f.fuel > 0 or f.cooking)
+	if p.back.count() >= cap or (p.back.count() >= mini(4, cap) and Game.woodpile < 3) or (p.back.count() > 0 and fires_idle):
+		return {"text": "Stack logs by the " + String(Game.build_def("campfire").name).to_lower(), "pos": pile_zone.global_position}
+	if Game.counter_coins >= 40:
+		return {"text": "Collect your coins", "pos": COIN_POS}
+	if Game.woodpile < 4:
+		return {"text": "Chop wood for the " + _cooker_word(), "pos": _nearest_tree_pos()}
+	if Game.counter_coins > 0:
+		return {"text": "Collect your coins", "pos": COIN_POS}
+	if Game.built.has("shop"):
+		for tr in ["tool", "bag", "boots", "fire", "menu"]:
+			var n := Game.next_upgrade(tr)
+			if not n.is_empty() and Game.coins >= int(n.cost):
+				return {"text": "Upgrade at the " + String(Game.build_def("shop").name).to_lower(), "pos": PADS.shop}
+	return {"text": "Keep the " + _cooker_word() + " fed", "pos": Vector3.ZERO}
+
+
+# ------------------------------------------------------------------ FX
+
+func _fx(pos: Vector3, color: Color, amount: int, vel: float, size: float, grav: float, mesh_kind := "box") -> void:
+	var p := _fx_pool[_fx_i]
+	_fx_i = (_fx_i + 1) % _fx_pool.size()
+	p.position = pos
+	p.amount = amount
+	p.lifetime = 0.9
+	p.direction = Vector3.UP
+	p.spread = 70.0
+	p.initial_velocity_min = vel * 0.5
+	p.initial_velocity_max = vel
+	p.gravity = Vector3(0, grav, 0)
+	p.scale_amount_min = size * 0.6
+	p.scale_amount_max = size
+	if mesh_kind == "box":
+		var bm := BoxMesh.new()
+		bm.size = Vector3(0.06, 0.03, 0.09)
+		var m := Art.paint(color, 0.8)
+		bm.material = m
+		p.mesh = bm
+		p.color = Color.WHITE
+		p.angular_velocity_min = -400
+		p.angular_velocity_max = 400
+		p.particle_flag_rotate_y = true
+	else:
+		var qm := QuadMesh.new()
+		qm.size = Vector2(0.25, 0.25)
+		var fm := StandardMaterial3D.new()
+		fm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		fm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		fm.billboard_mode = BaseMaterial3D.BILLBOARD_PARTICLES
+		fm.vertex_color_use_as_albedo = true
+		fm.albedo_texture = _soft_dot()
+		qm.material = fm
+		p.mesh = qm
+		var g := Gradient.new()
+		g.set_color(0, color)
+		g.set_color(1, Color(color, 0.0))
+		p.color_ramp = g
+	if mesh_kind == "box":
+		p.color_ramp = null
+	p.restart()
+	p.emitting = true
+
+
+func fx_chips(pos: Vector3) -> void:
+	_fx(pos, Color(0.85, 0.65, 0.4), 10, 3.0, 1.0, -9.0)
+
+
+func fx_leaves(pos: Vector3) -> void:
+	_fx(pos, Color(0.25, 0.45, 0.18), 18, 2.5, 1.3, -3.0)
+
+
+func fx_dust(pos: Vector3) -> void:
+	_fx(pos + Vector3(0, 0.4, 0), Color(0.9, 0.85, 0.75, 0.8), 24, 3.0, 2.5, -1.0, "soft")
+
+
+func fx_burst(pos: Vector3, color: Color, n: int) -> void:
+	_fx(pos, color, n, 4.0, 0.8, -4.0, "soft")
+
+
+func _cooker_word() -> String:
+	return {"firepit": "fire", "grill": "grill", "fryer": "fryer", "oven": "oven", "smoker": "smoker"}.get(String(Game.chapter().cooker), "fire")
+
+
+## Graphics level -> how much background decor is drawn (Smooth thins it out).
+func apply_quality() -> void:
+	var smooth := LOW_END and Game.quality == 0
+	for n in get_tree().get_nodes_in_group("edge_forest") + get_tree().get_nodes_in_group("scatter"):
+		if not is_ancestor_of(n):
+			continue
+		var mm: MultiMesh = n.multimesh
+		var keep := 0.55 if n.is_in_group("edge_forest") else 0.35
+		mm.visible_instance_count = int(mm.instance_count * keep) if smooth else -1

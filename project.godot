@@ -3,11 +3,20 @@ config_version=5
 
 [application]
 
-config/name="Axe to Empire (Prototype)"
-config/version="0.1.0"
-run/main_scene="res://main.tscn"
+config/name="Axe to Empire"
+config/version="0.2.0"
+run/main_scene="res://scenes/main.tscn"
 config/features=PackedStringArray("4.7", "GL Compatibility")
 config/icon="res://icon.svg"
+boot_splash/bg_color=Color(0.07, 0.043, 0.024, 1)
+boot_splash/image="res://assets/splash.png"
+boot_splash/stretch_mode=4
+boot_splash/use_filter=true
+
+[autoload]
+
+Game="*res://scripts/core/game_state.gd"
+Sfx="*res://scripts/core/sfx.gd"
 
 [display]
 
@@ -23,9 +32,23 @@ window/handheld/orientation=1
 
 gdscript/warnings/integer_division=0
 gdscript/warnings/narrowing_conversion=0
+gdscript/warnings/unused_parameter=0
+
+[input_devices]
+
+pointing/emulate_touch_from_mouse=true
 
 [rendering]
+
+shading/overrides/force_vertex_shading.mobile=true
+shading/overrides/force_lambert_over_burley.mobile=true
 
 renderer/rendering_method="gl_compatibility"
 renderer/rendering_method.mobile="gl_compatibility"
 textures/vram_compression/import_etc2_astc=true
+anti_aliasing/quality/msaa_3d=1
+anti_aliasing/quality/msaa_3d.mobile=0
+lights_and_shadows/directional_shadow/size=2048
+lights_and_shadows/directional_shadow/size.mobile=1024
+lights_and_shadows/directional_shadow/soft_shadow_filter_quality=2
+lights_and_shadows/directional_shadow/soft_shadow_filter_quality.mobile=1

@@ -1,0 +1,25 @@
+extends SceneTree
+## Gameplay view of a chapter with its camp built: -- <out.png> <chapter>
+func _initialize() -> void:
+	_run.call_deferred()
+func _run() -> void:
+	var a := OS.get_cmdline_user_args()
+	var k := int(a[1])
+	var g = root.get_node("Game")
+	g.saving_enabled = false; g.offline_reward = 0
+	g.venue = k; g.unlocked = k + 1; g.venues = []
+	g.cfg = g.chapter_cfg(k)
+	g.built = {"campfire": true, "tables_1": true, "shop": true, "crew_hut": true, "fire_2": true}
+	g.crew = {"lumberjack": 1, "waiter": 1, "cook": 0}
+	g.woodpile = 20; g.rack = 4
+	change_scene_to_file("res://scenes/main.tscn")
+	while current_scene == null or current_scene.get("hud") == null or current_scene.get_node_or_null("LoadingScreen") != null:
+		await process_frame
+	var w = current_scene.world
+	w.player.global_position = Vector3(1.0, 0, 1.6)
+	Engine.time_scale = 4.0
+	await create_timer(6.0).timeout
+	Engine.time_scale = 1.0
+	await create_timer(0.5).timeout
+	root.get_texture().get_image().save_png(a[0])
+	quit()
