@@ -116,7 +116,7 @@ static func button(text: String, style := "gold", icon_name := "", size := 30, m
 	l.name = "Text"
 	row.add_child(l)
 	b.add_child(row)
-	b.custom_minimum_size.x = min_w
+	b.custom_minimum_size = Vector2(min_w, 68.0)
 	return b
 
 

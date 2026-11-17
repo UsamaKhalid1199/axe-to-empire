@@ -35,6 +35,9 @@ var served: int = 0
 var built: Dictionary = {}          # build id -> true
 var pad_paid: Dictionary = {}       # build id -> coins paid so far
 var levels := {"tool": 0, "bag": 0, "boots": 0, "fire": 0, "menu": 0, "dining": 0, "sign": 0, "station": 0}
+## "Pro" gear levels bought after a tool / backpack / boots track is maxed (priced per chapter).
+var pro := {"tool": 0, "bag": 0, "boots": 0}
+const PRO_MAX := 10
 var crew := {"lumberjack": 0, "waiter": 0, "cook": 0}
 var rating_hist: Array = []         # last 40 scores (1..5)
 var stats := {"trees": 0, "logs": 0, "served": 0, "earned": 0, "sold": 0, "play_s": 0.0, "lost": 0, "walkouts": 0, "golden": 0, "bigdays": 0}
@@ -390,6 +393,7 @@ func start_new_empire() -> void:
 	unlocked = 1
 	coins = 0
 	levels = {"tool": 0, "bag": 0, "boots": 0, "fire": 0, "menu": 0, "dining": 0, "sign": 0, "station": 0}
+	pro = {"tool": 0, "bag": 0, "boots": 0}
 	_unstash(0)
 	_cc_cache.clear()
 	cfg = chapter_cfg(0)
@@ -421,15 +425,26 @@ func spend(n: int) -> bool:
 
 
 func tool() -> Dictionary:
-	return cfg.tools[levels.tool]
+	var t: Dictionary = cfg.tools[levels.tool]
+	if int(pro.tool) > 0:
+		t = t.duplicate()
+		t["interval"] = float(t.interval) / (1.0 + 0.1 * int(pro.tool))   # Pro: +10% chop speed per level
+	return t
 
 
 func bag_cap() -> int:
-	return int(cfg.bag[levels.bag].cap)
+	return int(cfg.bag[levels.bag].cap) + 6 * int(pro.bag)
 
 
 func speed_mult() -> float:
-	return float(cfg.boots[levels.boots].mult)
+	return float(cfg.boots[levels.boots].mult) + 0.04 * int(pro.boots)
+
+
+## Price of the next Pro level: grows per level and with the chapter you're in.
+func pro_cost(track: String) -> int:
+	var arr: Array = cfg.tools if track == "tool" else cfg[track]
+	var last := float(arr[arr.size() - 1].cost)
+	return int(round(last * pow(1.5, int(pro[track]) + 1) * chapter_mult(venue) / 10.0)) * 10
 
 
 func cook_time() -> float:
@@ -790,7 +805,9 @@ func next_upgrade(track: String) -> Dictionary:
 	var arr: Array = cfg.tools if track == "tool" else cfg[track]
 	var lv: int = levels[track]
 	if lv + 1 >= arr.size():
-		return {}
+		if int(pro[track]) >= PRO_MAX:
+			return {}
+		return {"pro": int(pro[track]) + 1, "cost": pro_cost(track)}
 	return arr[lv + 1]
 
 
@@ -798,7 +815,10 @@ func buy_upgrade(track: String) -> bool:
 	var nxt := next_upgrade(track)
 	if nxt.is_empty() or not spend(int(nxt.cost)):
 		return false
-	levels[track] += 1
+	if nxt.has("pro"):
+		pro[track] = int(pro[track]) + 1
+	else:
+		levels[track] += 1
 	state_changed.emit()
 	save_game()
 	return true
@@ -1030,7 +1050,7 @@ func to_dict() -> Dictionary:
 		"counter_coins": counter_coins, "jobs_day": jobs_day, "jobs": jobs, "streak": streak,
 		"streak_last_day": streak_last_day, "chest_claimed": chest_claimed, "chest_day": chest_day, "mute": mute, "quality": quality, "quality_auto": quality_auto,
 		"sp": sp, "venue": venue, "unlocked": unlocked, "venues": _venues_for_save(), "vserved": vserved, "prestige": prestige,
-		"t": int(Time.get_unix_time_from_system()), "lv2": true, "settings": settings, "profile": profile, "offline_reward": offline_reward, "gate_refund": true,
+		"t": int(Time.get_unix_time_from_system()), "lv2": true, "settings": settings, "profile": profile, "pro": pro, "offline_reward": offline_reward, "gate_refund": true,
 	}
 
 
@@ -1105,6 +1125,9 @@ func load_game() -> void:
 	unlocked = int(d.get("unlocked", 2 if chapter_done else 1))
 	for k in d.get("settings", {}):
 		settings[k] = d.settings[k]
+	var pd: Dictionary = d.get("pro", {})
+	for k in pro:
+		pro[k] = clampi(int(pd.get(k, 0)), 0, PRO_MAX)
 	var pr: Dictionary = d.get("profile", {})
 	if pr.has("owned") and pr.has("equipped"):
 		profile = pr
@@ -1192,4 +1215,5 @@ func reset_all() -> void:
 	stats = {"trees": 0, "logs": 0, "served": 0, "earned": 0, "sold": 0, "play_s": 0.0, "lost": 0, "walkouts": 0, "golden": 0, "bigdays": 0}
 	reno = {}; bigday = {}; seen = {}; task_i = 0; task_base = 0; golden_n = 0; walkouts = 0; _star_cache = 0
 	levels = {"tool": 0, "bag": 0, "boots": 0, "fire": 0, "menu": 0, "dining": 0, "sign": 0, "station": 0}
+	pro = {"tool": 0, "bag": 0, "boots": 0}
 	jobs_day = ""; refresh_jobs()

@@ -56,6 +56,11 @@ Hotel plaza, station yards).
 
 Arriving at a new venue for the first time, the crew you bring sets up the cooker, one lumberjack comes along and
 there are 12 logs on the pile. Tools, bag and boots carry over between venues; buildings, kitchen and crew are per venue.
+Once a gear track is maxed, the shop sells **Pro** levels (up to Pro 10 each): Pro tool swings 10% faster per level,
+Pro bag carries +6 logs, Pro boots run +4% faster. Pro prices scale with the chapter, so the tool shed stays useful
+in every venue. Wardrobe items cost from $20K to $25M and the best ones need stars (up to 10).
+
+The camera keeps the play area left of the side buttons and widens slightly on tall (20:9) phones.
 
 ## Upgrade values (measured by `tests/upgradetest.gd`)
 
@@ -98,7 +103,7 @@ $G --headless --path . --script res://tests/flowtest.gd             # A-Z empire
 $G --headless --path . --script res://tests/autoplay.gd -- 8 60 0   # bot plays chapter 0 at 8x and prints pacing
 $G --headless --path . --script res://tests/lumbertest.gd           # lumberjacks stack logs and rest (never sell)
 $G --headless --path . --script res://tests/wardrobetest.gd         # wardrobe buy/equip/persist
-$G --headless --path . --script res://tests/audittest.gd            # regressions: level cap, star-3 replay, cash pickup, gate keeps cash
+$G --headless --path . --script res://tests/audittest.gd            # regressions: level cap, star-3 replay, cash pickup, gate keeps cash, Pro gear
 $G --headless --path . -s res://tests/upgradetest.gd -- <chapter>   # every upgrade measured in game + live income/payback per station
 $G --headless --path . -s res://tests/qa/qa4_input.gd               # taps: X buttons, second finger, taps during rebuild/close/double-tap
 $G --headless --path . -s res://tests/qa/chapters_flow.gd           # next/previous chapter, travel, save/load, migration (~110 checks)

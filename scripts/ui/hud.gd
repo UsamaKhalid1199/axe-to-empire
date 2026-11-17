@@ -75,7 +75,7 @@ func _ready() -> void:
 	_coin_shown = Game.coins
 	if OS.is_debug_build():
 		fps_label = UI.label("", 18, Color(1, 1, 1, 0.7))
-		fps_label.position = Vector2(24, root.get_viewport_rect().size.y - 40)
+		fps_label.position = Vector2(24, root.get_viewport_rect().size.y - 96)
 		root.add_child(fps_label)
 	_refresh_top()
 	_refresh_task()
@@ -543,6 +543,14 @@ func _row(v: VBoxContainer, icon_name: String, title: String, desc: String, stat
 	v.add_child(r)
 
 
+## A scroll area only as tall as what it holds (no empty half-card), up to `cap`.
+func _fit_scroll(sc: ScrollContainer, cap: float) -> void:
+	if not is_instance_valid(sc) or sc.get_child_count() == 0:
+		return
+	var h: float = (sc.get_child(0) as Control).get_combined_minimum_size().y
+	sc.custom_minimum_size.y = minf(cap, h + 4.0)
+
+
 func _restore_scroll(v: int) -> void:
 	if modal == null:
 		return
@@ -583,22 +591,33 @@ func _shop(v: VBoxContainer) -> void:
 	_header(v, "hammer", "Tool Shed", "Upgrades apply instantly")
 	var cur: Dictionary = Game.tool()
 	var nt := Game.next_upgrade("tool")
+	var tp: int = Game.pro.tool
+	var tname: String = String(cur.name) + (" Pro %d" % tp if tp > 0 else "")
 	if nt.is_empty():
-		_row(v, TOOL_ICONS[cur.id], cur.name, cur.desc, "Best tool owned", _price_button(0, Callable(), "MAX"))
+		_row(v, TOOL_ICONS[cur.id], tname, cur.desc, "Best tool, fully tuned", _price_button(0, Callable(), "MAX"))
+	elif nt.has("pro"):
+		_row(v, TOOL_ICONS[cur.id], String(cur.name) + " Pro %d" % int(nt.pro), "Tune your tool: +10% chop speed",
+			"+%d%% speed  →  +%d%%" % [10 * tp, 10 * int(nt.pro)], _price_button(int(nt.cost), func(): Game.buy_upgrade("tool")))
 	else:
 		_row(v, TOOL_ICONS[nt.id], nt.name, nt.desc, "Now: " + String(cur.name), _price_button(int(nt.cost), func(): Game.buy_upgrade("tool")))
 	var tracks := [
 		["bag", "bag", "Backpack", "Carry more logs per trip", func(d): return "%d logs" % int(d.cap)],
 		["boots", "boots", "Trail boots", "Run faster", func(d): return "+%d%% speed" % int(round((float(d.mult) - 1.0) * 100))],
 	]
+	var pro_txt := {"bag": func(n): return "%d logs" % (int(Game.cfg.bag[Game.cfg.bag.size() - 1].cap) + 6 * n),
+		"boots": func(n): return "+%d%% speed" % int(round((float(Game.cfg.boots[Game.cfg.boots.size() - 1].mult) - 1.0 + 0.04 * n) * 100))}
 	for t in tracks:
 		var key: String = t[0]
 		var arr: Array = Game.cfg[key]
 		var cur_d: Dictionary = arr[Game.levels[key]]
 		var nx := Game.next_upgrade(key)
 		var fmtf: Callable = t[4]
+		var pn: int = Game.pro[key]
 		if nx.is_empty():
-			_row(v, t[1], t[2], t[3], fmtf.call(cur_d) + "  (max)", _price_button(0, Callable(), "MAX"))
+			_row(v, t[1], t[2] + " Pro %d" % pn, t[3], pro_txt[key].call(pn) + "  (max)", _price_button(0, Callable(), "MAX"))
+		elif nx.has("pro"):
+			_row(v, t[1], t[2] + " Pro %d" % int(nx.pro), t[3], pro_txt[key].call(pn) + "  →  " + pro_txt[key].call(int(nx.pro)),
+				_price_button(int(nx.cost), func(): Game.buy_upgrade(key)))
 		else:
 			_row(v, t[1], t[2], t[3], fmtf.call(cur_d) + "  →  " + fmtf.call(nx),
 				_price_button(int(nx.cost), func(): Game.buy_upgrade(key)))
@@ -822,6 +841,7 @@ func _empire(v: VBoxContainer) -> void:
 	_header(v, "gate", "Your Empire", sub)
 	var sc := ScrollContainer.new()
 	sc.custom_minimum_size = Vector2(0, minf(820.0, root.get_viewport_rect().size.y - 420.0))
+	_fit_scroll.call_deferred(sc, minf(820.0, root.get_viewport_rect().size.y - 420.0))
 	sc.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	var list := UI.vbox(12)
 	list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -893,7 +913,7 @@ func _build_task_card() -> void:
 	pr.add_child(task_prog)
 	col.add_child(pr)
 	h.add_child(col)
-	task_btn = UI.button("", "green", "", 22, 110)
+	task_btn = UI.button("", "green", "", 24, 130)
 	task_btn.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	task_btn.pressed.connect(func():
 		if Game.task_done():
@@ -982,7 +1002,7 @@ func _clock(secs: int) -> String:
 func _build_bd_banner() -> void:
 	var cc := CenterContainer.new()
 	cc.set_anchors_preset(Control.PRESET_TOP_WIDE)
-	cc.position.y = _safe_top() + 140
+	cc.position.y = _safe_top() + 156
 	cc.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	root.add_child(cc)
 	bd_banner = UIShape.new("gold", 24.0, Vector4(22, 10, 22, 12))
@@ -990,7 +1010,7 @@ func _build_bd_banner() -> void:
 	var v := UI.vbox(4)
 	bd_title = UI.label("", 30, UI.INK, UI.font_bold(), HORIZONTAL_ALIGNMENT_CENTER)
 	v.add_child(bd_title)
-	bd_bar = UI.progress_bar(420, 14)
+	bd_bar = UI.progress_bar(380, 14)
 	var fg := StyleBoxFlat.new()
 	fg.bg_color = Color("#3E9B4F")
 	fg.set_corner_radius_all(7)
@@ -1044,6 +1064,9 @@ func _on_story(beats: Array) -> void:
 func _next_story() -> void:
 	if _story_q.is_empty() or modal_kind != "":
 		return
+	if joy.active:
+		get_tree().create_timer(0.6).timeout.connect(_next_story)
+		return
 	open_modal("story")
 
 
@@ -1082,7 +1105,8 @@ func _story(v: VBoxContainer) -> void:
 
 # ------------------------------------------------------------------ station upgrades
 
-const STATION_ICONS := {"fire": "fire", "menu": "menu", "dining": "smile", "sign": "star", "station": "upgrade"}
+const STATION_ICONS := {"fire": "fire", "menu": "menu", "dining": "smile", "sign": "sign", "station": "upgrade"}
+const SPECIAL_ICONS := {"drive_thru": "truck", "raft": "log", "fireplace": "fire", "bell": "bigday", "van": "truck"}
 
 
 func _station_effect(key: String, lv: int) -> String:
@@ -1100,6 +1124,7 @@ func _upgrades(v: VBoxContainer) -> void:
 	_header(v, "upgrade", "Upgrades", String(Game.chapter().name) + "   " + "".join(st.map(func(x): return "★" if x else "☆")))
 	var sc := ScrollContainer.new()
 	sc.custom_minimum_size = Vector2(0, minf(900.0, root.get_viewport_rect().size.y - 470.0))
+	_fit_scroll.call_deferred(sc, minf(900.0, root.get_viewport_rect().size.y - 470.0))
 	sc.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	var list := UI.vbox(12)
 	list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -1146,7 +1171,8 @@ func _upgrades(v: VBoxContainer) -> void:
 			btn = _price_button(Game.station_cost(key), func():
 				if Game.station_upgrade(kk):
 					_rebuild_modal())
-		_row(list, STATION_ICONS.get(key, "star"), title, String(d.desc), stat, btn)
+		var ic: String = SPECIAL_ICONS.get(Game.special_type(), "upgrade") if key == "station" else STATION_ICONS.get(key, "star")
+		_row(list, ic, title, String(d.desc), stat, btn)
 	var info := UI.label("Star 1: win the Big Day.  Star 2: serve twice the gate's guests with a 4.5 rating.  Star 3: a Big Day with no walkouts and every station at Lv 15+.  Each star: +4% income everywhere.", 19, UI.MUTED, null, HORIZONTAL_ALIGNMENT_CENTER)
 	info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	v.add_child(info)
@@ -1161,6 +1187,7 @@ func _character(v: VBoxContainer) -> void:
 	_header(v, "character", "Your Lumberjack", "Empire %d · %d ★ · %s served" % [Game.prestige + 1, Game.total_stars(), UI.fmt(Game.served)])
 	var sc := ScrollContainer.new()
 	sc.custom_minimum_size = Vector2(0, minf(940.0, root.get_viewport_rect().size.y - 430.0))
+	_fit_scroll.call_deferred(sc, minf(940.0, root.get_viewport_rect().size.y - 430.0))
 	sc.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	var list := UI.vbox(12)
 	list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -1217,7 +1244,7 @@ func _character(v: VBoxContainer) -> void:
 		else:
 			var why: String = W.can_buy(id)
 			var price := int(it.get("price", 0))
-			stat = ("Needs %d ★  ·  " % int(it.stars) if int(it.get("stars", 0)) > 0 else "") + (UI.cash(price) if price > 0 else "Free")
+			stat = "Needs %d ★" % int(it.stars) if int(it.get("stars", 0)) > Game.total_stars() else ""
 			if why != "" and why.begins_with("Need") and why.contains("★"):
 				b = _price_button(0, Callable(), "%d ★" % int(it.stars))
 			else:
@@ -1255,7 +1282,7 @@ func _toggle(v: VBoxContainer, icon_name: String, text: String, on: bool, cb: Ca
 	var l := UI.label(text, 28, Color.WHITE, UI.font_ui(600))
 	l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	h.add_child(l)
-	var b := UI.button("ON" if on else "OFF", "green" if on else "dark", "", 26, 120)
+	var b := UI.button("ON" if on else "OFF", "green" if on else "dark", "", 28, 132)
 	b.pressed.connect(func():
 		cb.call()
 		Game.save_game()
@@ -1297,14 +1324,28 @@ func _settings(v: VBoxContainer) -> void:
 				open_modal(kind))
 		row.add_child(b)
 	v.add_child(row)
-	var rs := UI.button("Tap again to erase everything" if _confirm_reset else "Reset progress", "red", "", 26)
-	rs.pressed.connect(func():
-		if _confirm_reset:
-			Game.reset_all()
-		else:
+	if _confirm_reset:
+		var warn := UI.label("Erase ALL progress, cash, crew and outfits? This can't be undone.", 22, UI.RED, null, HORIZONTAL_ALIGNMENT_CENTER)
+		warn.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		v.add_child(warn)
+		var rr := UI.hbox(12)
+		var cancel := UI.button("Keep my game", "green", "", 26)
+		cancel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		cancel.pressed.connect(func():
+			_confirm_reset = false
+			_rebuild_modal())
+		var erase := UI.button("Erase", "red", "", 26)
+		erase.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		erase.pressed.connect(func(): Game.reset_all())
+		rr.add_child(cancel)
+		rr.add_child(erase)
+		v.add_child(rr)
+	else:
+		var rs := UI.button("Reset progress", "red", "", 26)
+		rs.pressed.connect(func():
 			_confirm_reset = true
 			_rebuild_modal())
-	v.add_child(rs)
+		v.add_child(rs)
 	var cr := UI.label("Axe to Empire v%s · BigoSoft\nFonts: Inter, Barlow Condensed (OFL)" % str(ProjectSettings.get_setting("application/config/version")), 18, UI.MUTED, null, HORIZONTAL_ALIGNMENT_CENTER)
 	v.add_child(cr)
 

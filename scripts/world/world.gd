@@ -129,7 +129,8 @@ func _finish_build() -> void:
 	add_child(player)
 	player.global_position = SPAWN
 	cam = Camera3D.new()
-	cam.fov = 52.0
+	var vsz := get_viewport().get_visible_rect().size
+	cam.fov = 56.0 if vsz.x / maxf(1.0, vsz.y) < 0.5 else 52.0     # tall 20:9 phones: a bit wider so edge labels fit
 	cam.keep_aspect = Camera3D.KEEP_WIDTH
 	cam.far = 120.0
 	add_child(cam)
@@ -1526,8 +1527,16 @@ func _place_cam(t: float) -> void:
 	cam.look_at(cam.global_position - off + Vector3(0, 0, 0), Vector3.UP)
 
 
+## The HUD's button column covers the right edge, so the camera looks a little to the right:
+## the player (and the counter next to them) sit in the middle of the uncovered part of the screen.
+func _hud_side_shift() -> float:
+	var vs := get_viewport().get_visible_rect().size
+	var ground_w := 2.0 * cam_off.length() * tan(deg_to_rad(cam.fov * 0.5))
+	return ground_w * (59.0 / maxf(1.0, vs.x))
+
+
 func _cam_tick(delta: float) -> void:
-	_cam_target = _cam_target.lerp(player.global_position + Vector3(0, 0, -0.8), clampf(delta * 5.0, 0.0, 1.0))
+	_cam_target = _cam_target.lerp(player.global_position + Vector3(_hud_side_shift(), 0, -0.8), clampf(delta * 5.0, 0.0, 1.0))
 	_shake = maxf(0.0, _shake - delta)
 	_place_cam(clampf(delta * 8.0, 0.0, 1.0))
 	# see-through foliage around the player

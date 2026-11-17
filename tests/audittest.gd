@@ -61,5 +61,25 @@ func _run() -> void:
 	var before_gate: int = g.coins
 	g.open_next_venue()
 	ok(g.unlocked >= 2 and g.coins == before_gate, "gate opened and cash kept (%d -> %d)" % [before_gate, g.coins])
+	# Pro gear: after the last tier, the shop keeps selling useful, chapter-priced levels
+	g.coins = 0
+	g.pro = {"tool": 0, "bag": 0, "boots": 0}
+	g.levels.tool = g.cfg.tools.size() - 1; g.levels.bag = g.cfg.bag.size() - 1; g.levels.boots = g.cfg.boots.size() - 1
+	var nx: Dictionary = g.next_upgrade("bag")
+	ok(nx.has("pro") and int(nx.cost) > 0, "maxed bag offers Pro 1 ($%d)" % int(nx.get("cost", 0)))
+	var cap0: int = g.bag_cap(); var sp0: float = g.speed_mult(); var iv0: float = float(g.tool().interval)
+	var c1: int = g.pro_cost("bag")
+	g.coins = 10000000000
+	ok(g.buy_upgrade("bag") and g.buy_upgrade("boots") and g.buy_upgrade("tool"), "Pro levels can be bought")
+	ok(g.bag_cap() > cap0 and g.speed_mult() > sp0 and float(g.tool().interval) < iv0, "each Pro level helps (bag %d->%d, speed %.2f->%.2f, swing %.2f->%.2f)" % [cap0, g.bag_cap(), sp0, g.speed_mult(), iv0, float(g.tool().interval)])
+	ok(g.pro_cost("bag") > c1, "next Pro level costs more")
+	g.pro.bag = g.PRO_MAX
+	ok(g.next_upgrade("bag").is_empty(), "Pro caps at %d" % g.PRO_MAX)
+	var d: Dictionary = g.to_dict()
+	ok(d.has("pro") and int(d.pro.bag) == g.PRO_MAX, "Pro levels are saved")
+	var ch1: int = g.pro_cost("boots")
+	g.venue = 4
+	ok(g.pro_cost("boots") > ch1 * 5, "Pro priced per chapter (ch1 $%d, ch5 $%d)" % [ch1, g.pro_cost("boots")])
+	g.venue = 0
 	print("AUDIT fails=%d" % fails)
 	quit()
