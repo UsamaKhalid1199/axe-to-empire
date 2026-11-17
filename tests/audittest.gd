@@ -42,5 +42,12 @@ func _run() -> void:
 	g._compute_offline(int(Time.get_unix_time_from_system()) - 3600)
 	ok(g.offline_reward >= before, "away cash accumulates (%d -> %d)" % [before, g.offline_reward])
 	g.offline_reward = 0
+	# a full cash pile comes over in well under a second
+	g.counter_coins = 5000
+	w.coin_stack.set_count(w._coin_visuals(g.counter_coins))
+	var c0: int = g.coins
+	w.player.global_position = w.COIN_POS
+	await create_timer(0.8).timeout
+	ok(g.counter_coins == 0 and g.coins - c0 == 5000, "cash pile collected in 0.8 s (left %d, got %d)" % [g.counter_coins, g.coins - c0])
 	print("AUDIT fails=%d" % fails)
 	quit()

@@ -748,7 +748,7 @@ func _spawn_building(id: String, animate: bool) -> void:
 			coin_stack.position = COIN_POS
 			root.add_child(coin_stack)
 			coin_stack.set_count(_coin_visuals(Game.counter_coins))
-			coin_zone = _zone("coins", "coins", COIN_POS, Vector2(1.3, 1.3), Color("#FFD978"), "")
+			coin_zone = _zone("coins", "coins", COIN_POS, Vector2(1.6, 1.6), Color("#FFD978"), "")
 			var bench := Art.model("wooden_stool_01")
 			bench.position = FIRE_POS[0] + Vector3(-1.1, 0, 0.4)
 			root.add_child(bench)
@@ -1086,6 +1086,21 @@ func counter_give_to(s: Stack) -> void:
 		s.receive(counter_stack.take(), 0.25)
 
 
+## Moves cash from the counter pile to the player. The whole pile comes over in about `ticks` ticks.
+func collect_cash(ticks: int) -> void:
+	if Game.counter_coins <= 0:
+		return
+	var n := coin_stack.count()
+	var bills := maxi(2, int(ceil(54.0 / float(ticks))))   # fixed batch: a full pile (54 bills) empties in `ticks` ticks
+	var amount := Game.counter_coins if n <= bills else int(ceil(float(Game.counter_coins) * float(bills) / float(n)))
+	amount = mini(amount, Game.counter_coins)
+	Game.counter_coins -= amount
+	Game.add_coins(amount)
+	for i in mini(bills, n):
+		Stack.fly_free(self, "coin", coin_stack.take(), player.global_position + Vector3(0, 1.4, 0), 0.22 + i * 0.03)
+	Sfx.play("coin", -6.0, 1.0 + randf() * 0.2, 0.05)
+
+
 func _coin_visuals(amount: int) -> int:
 	return mini(54, int(ceil(amount / 5.0)))
 
@@ -1314,7 +1329,8 @@ func _zones_tick(delta: float) -> void:
 		if not inside:
 			continue
 		# zones only work once the player stops on them — walking across never spends or opens anything
-		if not player.is_still():
+		# (picking up cash is harmless, so that one also works on the move)
+		if not player.is_still() and z.kind != "coins":
 			z.tick = maxf(z.tick, 0.12)
 			continue
 		if not _engaged.get(z, false):
@@ -1338,20 +1354,13 @@ func _zone_action(z: Zone) -> void:
 			z.tick = 0.12
 			if player.hands.count() < int(Game.cfg.player.carry_dishes):
 				rack_take_to(player.hands)
+		"coins":
+			z.tick = 0.05
+			collect_cash(8)
 		"serve":
 			z.tick = 0.12
 			counter_put_from(player.hands)
-		"coins":
-			z.tick = 0.04
-			if Game.counter_coins > 0:
-				var n := coin_stack.count()
-				var per := int(ceil(float(Game.counter_coins) / maxf(1.0, float(n))))
-				var amount := mini(per, Game.counter_coins)
-				Game.counter_coins -= amount
-				Game.add_coins(amount)
-				if n > 0:
-					Stack.fly_free(self, "coin", coin_stack.take(), player.global_position + Vector3(0, 1.4, 0), 0.25)
-				Sfx.play("coin", -6.0, 1.0 + randf() * 0.2, 0.05)
+			collect_cash(14)        # standing at the counter also scoops up the cash next to it
 		"build":
 			z.tick = 0.035
 			var b := Game.build_def(z.id)
@@ -1615,7 +1624,7 @@ func _compute_objective() -> Dictionary:
 	var pile_full: bool = Game.woodpile >= int(Game.cfg.woodpile_cap)
 	if (p.back.count() >= cap and not pile_full) or (p.back.count() >= mini(4, cap) and Game.woodpile < 3) or (p.back.count() > 0 and fires_idle):
 		return {"text": "Stack logs by the " + String(Game.build_def("campfire").name).to_lower(), "pos": pile_zone.global_position}
-	if Game.counter_coins >= int(4.0 * Game.dish_price()):
+	if Game.counter_coins >= int(10.0 * Game.dish_price()):
 		return {"text": "Collect your cash", "pos": COIN_POS}
 	if Game.woodpile < 4:
 		return {"text": "Chop wood for the " + _cooker_word(), "pos": _nearest_tree_pos()}
