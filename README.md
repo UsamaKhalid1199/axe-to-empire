@@ -90,7 +90,8 @@ $G --path . --resolution 720x1280 --script res://tests/uishot2.gd -- <outdir>   
 $G --path . --resolution 540x960 --script res://tests/chaptershot.gd -- <out.png> <chapter> sp   # frame a chapter's station
 ```
 
-Bot pacing (chapter finished including the Big Day): chapter 1 ~32 min. The bot also buys station upgrades
+Bot pacing (chapter finished including the Big Day, game minutes at 8x): Camp 45, Shack 56, Lake 56,
+Lodge 45, Smokehouse 42, Hotel 37; every Big Day won on the first try, 2 stars each. The bot also buys station upgrades
 along the way, so a focused player is faster.
 
 ## Build and run on a phone
