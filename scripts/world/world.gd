@@ -117,6 +117,9 @@ func build_steps() -> Array:
 	]
 
 
+var _pad_warn_ms := -100000
+
+
 func _finish_build() -> void:
 	process_mode = Node.PROCESS_MODE_INHERIT
 	apply_quality()
@@ -147,9 +150,13 @@ func _finish_build() -> void:
 	if Game.task_i == 0 and not Game.seen.has("task_init"):
 		Game._task_start()
 	golden_t = randf_range(60.0, 100.0)
+	if Game.refund_note > 0:
+		Game.toast.emit("Gate fees refunded: +%s. Your savings now always come with you!" % UI.cash(Game.refund_note))
+		Game.refund_note = 0
+		Game.save_game()
 	if Game.head_start_note:
 		Game.head_start_note = false
-		Game.toast.emit("Your crew set up the " + String(Game.build_def("campfire").name).to_lower())
+		Game.toast.emit("New place! Your %s came with you, and your crew set up the %s" % [UI.cash(Game.coins), String(Game.build_def("campfire").name).to_lower()])
 		var intro := String(Game.special_def().get("intro", ""))
 		if intro != "":
 			Game.toast.emit(intro)
@@ -1366,6 +1373,12 @@ func _zone_action(z: Zone) -> void:
 			var b := Game.build_def(z.id)
 			var rate := maxi(1, int(ceil(float(b.cost) / 40.0)))
 			var moved := Game.pay_pad(z.id, rate)
+			if moved == 0 and Game.coins <= 0 and not Game.built.has(z.id):
+				z.tick = 0.5
+				var now_ms := Time.get_ticks_msec()
+				if now_ms - _pad_warn_ms > 5000:
+					_pad_warn_ms = now_ms
+					Game.toast.emit("Not enough cash: serve guests, then come back to build")
 			if moved > 0:
 				if randf() < 0.5:
 					Stack.fly_free(self, "coin", player.global_position + Vector3(0, 1.3, 0), z.global_position, 0.25)

@@ -660,7 +660,7 @@ func _complete(v: VBoxContainer) -> void:
 		txt = "You built the whole Timber Empire! Start a New Empire in a new valley: everything resets, but every dollar you earn is worth +50% more, forever."
 	else:
 		var nx: Dictionary = Game.chapters[Game.venue + 1]
-		txt = "%s is open: %s. New there: %s. Your crew here keeps working and earns for you while you're away." % [nx.name, String(nx.tagline).to_lower(), String(nx.get("special", {}).get("name", "")).to_lower()]
+		txt = "%s is open: %s. New there: %s. It's a brand-new place, so you build it up from scratch, but your %s comes with you, and your crew here keeps earning for you." % [nx.name, String(nx.tagline).to_lower(), String(nx.get("special", {}).get("name", "")).to_lower(), UI.cash(Game.coins)]
 	var l := UI.label(txt, 22, UI.MUTED, null, HORIZONTAL_ALIGNMENT_CENTER)
 	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	v.add_child(l)

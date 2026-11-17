@@ -283,6 +283,7 @@ func _head_start() -> void:
 
 
 var head_start_note := false
+var refund_note := 0                # cash returned to an old save (shown once)
 
 
 ## The active chapter's signature station type ("" for the first chapter).
@@ -815,6 +816,9 @@ func build_available(id: String) -> bool:
 func pay_pad(id: String, amount: int) -> int:
 	var cost := int(build_def(id).cost)
 	var left := cost - int(pad_paid.get(id, 0))
+	if left <= 0:                       # already paid in full (e.g. a cost changed in an update)
+		complete_build(id)
+		return 0
 	var n: int = min(amount, left, coins)
 	if n <= 0:
 		return 0
@@ -855,7 +859,7 @@ func gate_ready() -> bool:
 func open_next_venue() -> void:
 	if not gate_ready():
 		return
-	spend(int(cfg.gate.coins))
+	# the savings goal is a target, not a fee: your cash comes with you to the next place
 	chapter_done = true
 	built["gate"] = true
 	if venue + 1 < chapters.size():
@@ -990,7 +994,7 @@ func to_dict() -> Dictionary:
 		"counter_coins": counter_coins, "jobs_day": jobs_day, "jobs": jobs, "streak": streak,
 		"streak_last_day": streak_last_day, "chest_claimed": chest_claimed, "mute": mute, "quality": quality, "quality_auto": quality_auto,
 		"sp": sp, "venue": venue, "unlocked": unlocked, "venues": _venues_for_save(), "vserved": vserved, "prestige": prestige,
-		"t": int(Time.get_unix_time_from_system()), "lv2": true, "settings": settings, "profile": profile, "offline_reward": offline_reward,
+		"t": int(Time.get_unix_time_from_system()), "lv2": true, "settings": settings, "profile": profile, "offline_reward": offline_reward, "gate_refund": true,
 	}
 
 
@@ -1093,6 +1097,13 @@ func load_game() -> void:
 		levels[key] = clampi(int(levels[key]), 0, station_max() - 1)
 	offline_reward = int(d.get("offline_reward", 0))
 	_cc_cache.clear()
+	# gates used to charge their savings goal; give that money back once to saves from before the fix
+	if not d.get("gate_refund", false) and unlocked > 1:
+		var back := 0
+		for k in unlocked - 1:
+			back += int(chapter_cfg(k).gate.coins)
+		coins += back
+		refund_note = back
 	cfg = chapter_cfg(venue)
 	refresh_stars()
 	_compute_offline(int(d.t))

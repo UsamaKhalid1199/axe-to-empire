@@ -34,7 +34,7 @@ func _run() -> void:
 	ok(g.stars()[0], "first star for the Big Day")
 	ok(g.gate_ready(), "gate ready with checklist done")
 	g.open_next_venue()
-	ok(g.coins == 1000, "gate costs 4000 (coins=%d)" % g.coins)
+	ok(g.coins == 5000, "gate keeps your savings (coins=%d)" % g.coins)
 	ok(g.unlocked == 2, "chapter 2 unlocked")
 	ok(g.chapter_done and g.built.has("gate"), "chapter 1 marked done")
 	# --- travel to chapter 2

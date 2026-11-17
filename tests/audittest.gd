@@ -49,5 +49,17 @@ func _run() -> void:
 	w.player.global_position = w.COIN_POS
 	await create_timer(0.8).timeout
 	ok(g.counter_coins == 0 and g.coins - c0 == 5000, "cash pile collected in 0.8 s (left %d, got %d)" % [g.counter_coins, g.coins - c0])
+	# a pad already paid in full (cost changed in an update) finishes instead of blinking forever
+	g.built.erase("tables_2")
+	g.pad_paid["tables_2"] = 999999
+	g.pay_pad("tables_2", 10)
+	ok(g.built.has("tables_2"), "over-paid pad completes")
+	# opening the gate keeps your savings
+	g.vserved = 500; g.rating_hist = [5.0]; g.coins = 50000
+	g.bigday["won"] = true
+	g.built["special"] = true
+	var before_gate: int = g.coins
+	g.open_next_venue()
+	ok(g.unlocked >= 2 and g.coins == before_gate, "gate opened and cash kept (%d -> %d)" % [before_gate, g.coins])
 	print("AUDIT fails=%d" % fails)
 	quit()

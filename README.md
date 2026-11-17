@@ -19,7 +19,7 @@ Godot 4.7.2, GDScript, `gl_compatibility` renderer. Tuned for low-end phones (Po
 6. Upgrade the five stations (kitchen, menu, dining, sign, signature station) from Lv 1 to 25 in **UPGRADE**.
    Shown levels 5/10/15/20/25 are timed renovations (finish early with cash).
 7. When every pad is built, start the chapter's **Big Day** at the gate: serve the goal within 180 s without
-   too many walkouts. Winning opens the gate and earns the first star; more stars (served 2x the gate goal at
+   too many walkouts. Winning opens the gate (the savings goal is a target, not a fee: your cash comes with you) and earns the first star; more stars (served 2x the gate goal at
    rating 4.5+, a clean Big Day with all stations Lv 15+) raise income.
 8. Use **MAP** to travel. Background venues earn at a reduced rate; away earnings are capped at 1-4 h depending
    on unlocked venues and need a crew. The game really pauses (tree + audio) when the phone locks.
