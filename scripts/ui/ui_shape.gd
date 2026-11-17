@@ -95,6 +95,7 @@ func _gui_input(e: InputEvent) -> void:
 			tw.tween_property(self, "scale", Vector2(0.94, 0.94), 0.06)
 		elif _down:
 			_down = false
+			accept_event()          # before emitting: a handler may free this button (modal rebuild/close)
 			var tw2 := create_tween()
 			tw2.tween_property(self, "scale", Vector2.ONE, 0.18).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 			if Rect2(Vector2.ZERO, size).has_point(e.position):
@@ -103,4 +104,5 @@ func _gui_input(e: InputEvent) -> void:
 				else:
 					Sfx.play("click")
 					pressed.emit()
+			return
 		accept_event()

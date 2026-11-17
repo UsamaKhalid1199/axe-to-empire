@@ -85,7 +85,7 @@ func spawn(r: Node3D) -> void:
 		"van": _build_van()
 
 
-func _z(kind: String, text: String, icon := "", size := Vector2(1.9, 1.6)) -> void:
+func _z(kind: String, text: String, icon := "", size := Vector2(2.3, 2.0)) -> void:
 	zone = world._zone("special", kind, pad_pos(), size, Color("#FFD978"), text, icon)
 
 
@@ -223,7 +223,7 @@ func _build_bell() -> void:
 	rope.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	world._collider(BELL + Vector3(0, 1, 0), Vector3(2.0, 2, 0.4))
 	_label = _sign("", BELL + Vector3(0, 3.9, 0), 60)
-	_z("bell", "RING", "res://assets/icons/star.svg", Vector2(1.8, 1.4))
+	_z("bell", "RING", "res://assets/icons/star.svg", Vector2(2.1, 1.7))
 
 
 func _build_van() -> void:
@@ -248,7 +248,7 @@ func _build_van() -> void:
 	van_stack.set_count(int(Game.sp.get("van", 0)))
 	world._collider(VAN + Vector3(0, 1, 0), Vector3(1.9, 2, 3.8))
 	_label = _sign("", VAN + Vector3(0, 2.8, 0), 56)
-	_z("van", "LOAD", "res://assets/icons/dish.svg", Vector2(1.5, 1.9))
+	_z("van", "LOAD", "res://assets/icons/dish.svg", Vector2(1.8, 2.2))
 	if float(Game.sp.get("away", 0.0)) > 0.0:
 		van.visible = false
 

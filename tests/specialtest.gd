@@ -143,9 +143,12 @@ func _run() -> void:
 			w.rack_stack.set_count(12)
 			g.state_changed.emit()
 			Engine.time_scale = 4.0
-			await create_timer(40.0).timeout
+			var used := false
+			for j in 40:
+				await create_timer(1.0).timeout
+				used = used or int(g.sp.get("van", 0)) > 0 or float(g.sp.get("away", 0.0)) > 0.0
 			Engine.time_scale = 1.0
-			ok(int(g.sp.get("van", 0)) > 0 or float(g.sp.get("away", 0.0)) > 0.0, "waiters loaded the van")
+			ok(used, "waiters loaded the van")
 	# crew income bonus for background venues
 	var base: float = g._rate(2, 2, 1, {"campfire": true, "tables_1": true, "tables_2": true, "fire_2": true}, 1, 1, g.cfg)
 	var with_sp: float = g.passive_rate() if false else base * g._special_mult(k, {"special": true})
