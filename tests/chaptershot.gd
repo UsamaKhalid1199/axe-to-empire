@@ -9,7 +9,7 @@ func _run() -> void:
 	g.saving_enabled = false; g.offline_reward = 0
 	g.venue = k; g.unlocked = k + 1; g.venues = []
 	g.cfg = g.chapter_cfg(k)
-	g.built = {"campfire": true, "tables_1": true, "shop": true, "crew_hut": true, "fire_2": true, "special": true}
+	g.built = {"campfire": true, "tables_1": true, "tables_2": true, "shop": true, "crew_hut": true, "fire_2": true, "special": true}
 	g.sp = {"fuel": 9}
 	g.crew = {"lumberjack": 1, "waiter": 1, "cook": 0}
 	g.woodpile = 20; g.rack = 4
@@ -20,7 +20,7 @@ func _run() -> void:
 		await process_frame
 	await create_timer(1.0).timeout
 	var w = current_scene.world
-	w.player.global_position = Vector3(1.0, 0, 1.6)
+	w.player.global_position = Vector3(1.0, 0, 3.6) if a.size() > 2 and a[2] == "dine" else Vector3(1.0, 0, 1.6)
 	if a.size() > 2 and a[2] == "sp" and w.specials.built:
 		w.player.global_position = w.specials.pad_pos() + (Vector3(-0.6, 0, 1.2) if w.specials.type == "raft" else Vector3(-2.6, 0, 0.6))
 		if w.specials.type == "raft":

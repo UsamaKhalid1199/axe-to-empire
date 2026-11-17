@@ -180,6 +180,7 @@ func _env() -> void:
 
 func _ground() -> void:
 	var img := Image.create(256, 256, false, Image.FORMAT_L8)
+	var patches: Array = Game.chapter().get("ground_patches", [])   # [x, z, rx, rz] worn dirt: car park, plaza, station yards
 	for y in 256:
 		for x in 256:
 			var wx := -40.0 + (x + 0.5) * 80.0 / 256.0
@@ -196,6 +197,10 @@ func _ground() -> void:
 			# trail into the forest
 			v = maxf(v, _seg(wx, wz, Vector2(-0.5, -2), Vector2(-1.5, -12), 1.1) * 0.8)
 			v = maxf(v, _seg(wx, wz, Vector2(1.5, 1), Vector2(6.3, 3.4), 1.0))
+			for pt in patches:
+				var px := (wx - float(pt[0])) / float(pt[2])
+				var pz := (wz - float(pt[1])) / float(pt[3])
+				v = maxf(v, (1.0 - sqrt(px * px + pz * pz)) * 1.4)
 			img.set_pixel(x, y, Color(clampf(v * 1.8, 0, 1), 0, 0))
 	var mask := ImageTexture.create_from_image(img)
 	var mat := Art.shader_mat("res://shaders/ground.gdshader")
@@ -281,25 +286,51 @@ func _collider(pos: Vector3, size: Vector3, rot_y := 0.0) -> void:
 	add_child(sb)
 
 
+## Choppable forest. Each chapter shapes it differently (chapters.json "forest"):
+##   spacing / row_gap / jitter  tree grid; clearings [[x, z, r]] meadows with rocks;
+##   avenue [x0, x1] an open alley through the whole forest; thin_east x where trees thin out (lakeshore).
 func _forest() -> void:
 	var rng := RandomNumberGenerator.new()
-	rng.seed = 42
+	rng.seed = 42 + Game.venue * 17
 	var cfg: Dictionary = Game.cfg.tree
+	var f: Dictionary = Game.chapter().get("forest", {})
+	var spacing := float(f.get("spacing", 2.75))
+	var row_gap := float(f.get("row_gap", 2.5))
+	var jitter := float(f.get("jitter", 0.5))
+	var clearings: Array = f.get("clearings", [])
+	var avenue: Array = f.get("avenue", [])
+	var thin_east := float(f.get("thin_east", 99.0))
 	var z := -6.2
 	var row := 0
 	while z > -25.0:
-		var x := -13.0 + (1.15 if row % 2 == 1 else 0.0)
-		while x < 13.5 and true:
-			var p := Vector3(x + rng.randf_range(-0.5, 0.5), 0, z + rng.randf_range(-0.45, 0.45))
-			if not (absf(p.x + 1.0) < 1.2 and p.z > -12.0):   # keep the trail open
-				var t := ChopTree.new()
-				t.setup(rng.randi() % 4, int(cfg.hp), float(cfg.regrow))
-				add_child(t)
-				t.position = p
-				trees.append(t)
-			x += 2.75
-		z -= 2.5
+		var x := -13.0 + (spacing * 0.42 if row % 2 == 1 else 0.0)
+		while x < 13.5:
+			var p := Vector3(x + rng.randf_range(-jitter, jitter), 0, z + rng.randf_range(-jitter * 0.9, jitter * 0.9))
+			x += spacing
+			var keep := not (absf(p.x + 1.0) < 1.2 and p.z > -12.0)   # keep the trail open
+			for c in clearings:
+				if Vector2(p.x - float(c[0]), p.z - float(c[1])).length() < float(c[2]):
+					keep = false
+			if avenue.size() == 2 and p.x > float(avenue[0]) and p.x < float(avenue[1]):
+				keep = false
+			if p.x > thin_east and rng.randf() < clampf((p.x - thin_east) / 6.0, 0.0, 0.85):
+				keep = false
+			if not keep:
+				continue
+			var t := ChopTree.new()
+			t.setup(rng.randi() % 4, int(cfg.hp), float(cfg.regrow))
+			add_child(t)
+			t.position = p
+			trees.append(t)
+		z -= row_gap
 		row += 1
+	# meadows get a rock or two so they read as places, not gaps
+	for c in clearings:
+		var rock := Art.model("rock_moss_set_01")
+		rock.position = Vector3(float(c[0]) + 0.4, 0, float(c[1]) - 0.3)
+		rock.scale = Vector3.ONE * 1.2
+		rock.rotation.y = rng.randf() * TAU
+		add_child(rock)
 	_build_tree_batch()
 
 
@@ -701,10 +732,7 @@ func _spawn_building(id: String, animate: bool) -> void:
 			_make_fire(1, root)
 		"tables_1", "tables_2":
 			for c in TABLES[id]:
-				var t := Art.model("wooden_picnic_table")
-				t.position = c
-				t.scale = Vector3.ONE * TABLE_SCALE
-				root.add_child(t)
+				_dining_table(c, root)
 				_collider(c + Vector3(0, 0.4, 0), Vector3(1.9, 0.8, 2.5))
 				for side in [-1.0, 1.0]:
 					for end in [-1.0, 1.0]:
@@ -749,6 +777,52 @@ func _spawn_building(id: String, animate: bool) -> void:
 				c.scale = s * 0.01
 				c.create_tween().tween_property(c, "scale", s, 0.5).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 		Game.toast.emit(String(Game.build_def(id).name) + " built!")
+
+
+## Dining furniture per chapter (chapters.json "dining"). Seat spots are the same for every style.
+##   picnic   wooden picnic tables
+##   parasol  picnic tables under striped parasols (roadside)
+##   lodge    picnic tables with a lantern on each (mountain evenings)
+##   round    round clothed tables, parasols and stools (hotel terrace)
+func _dining_table(c: Vector3, root: Node3D) -> void:
+	var style := String(Game.chapter().get("dining", "picnic"))
+	if style == "round":
+		var cloth := Art.paint(Color(0.96, 0.95, 0.92), 0.85)
+		var dark := Art.paint(Color(0.18, 0.15, 0.13), 0.5, 0.3)
+		var top := Art.cylinder(0.95, 0.06, cloth, c + Vector3(0, 0.64, 0), root, 20)
+		top.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+		Art.cylinder(0.97, 0.22, cloth, c + Vector3(0, 0.52, 0), root, 20)
+		Art.cylinder(0.08, 0.6, dark, c + Vector3(0, 0.3, 0), root, 8)
+		Art.cylinder(0.4, 0.04, dark, c + Vector3(0, 0.02, 0), root, 12)
+		for side in [-1.0, 1.0]:
+			for end in [-1.0, 1.0]:
+				Art.cylinder(0.22, 0.42, Art.plank_mat(), c + Vector3(side * 0.74, 0.21, end * 0.62), root, 10)
+	else:
+		var t := Art.model("wooden_picnic_table")
+		t.position = c
+		t.scale = Vector3.ONE * TABLE_SCALE
+		root.add_child(t)
+	if style in ["parasol", "round"]:
+		var stripe := _tc("parasol", Color(0.82, 0.16, 0.1))
+		# at the far end of the table so the top-down camera still sees the guests and their food
+		var at := c + Vector3(0, 0, -1.55)
+		var pole := Art.cylinder(0.04, 2.3, Art.paint(Color(0.9, 0.88, 0.84), 0.4), at + Vector3(0, 1.15, 0), root, 6)
+		pole.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var cm := CylinderMesh.new()
+		cm.top_radius = 0.05
+		cm.bottom_radius = 0.95
+		cm.height = 0.5
+		cm.radial_segments = 8
+		cm.material = Art.paint(stripe, 0.7)
+		var shade := MeshInstance3D.new()
+		shade.mesh = cm
+		shade.position = at + Vector3(0, 2.3, 0)
+		shade.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+		root.add_child(shade)
+	elif style == "lodge":
+		var lan := Art.model("wooden_lantern_01")
+		lan.position = c + Vector3(0, 0.68, 0)
+		root.add_child(lan)
 
 
 func pad_pos(id: String) -> Vector3:

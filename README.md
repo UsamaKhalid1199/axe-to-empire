@@ -33,6 +33,12 @@ built station raises that venue's crew income (+25-40%), including in the backgr
 own theme (sky, sun, grass, foliage season, building colours, a lake for chapter 3) and props (tent, gas pump,
 rowboat, snowman and skis, hay and pumpkins, hotel planters) plus a road sign with the venue name.
 
+Layouts differ per chapter too (`chapters.json`): `forest` shapes the choppable forest (a meadow at the Shack,
+a forest thinning toward the lakeshore, sparse mountain woods with two meadows, straight orchard rows at the
+Smokehouse, a long open avenue at the Hotel), `dining` picks the furniture (picnic tables, parasols at table ends,
+lodge lanterns, round clothed hotel tables with stools) and `ground_patches` adds worn ground (Shack car park,
+Hotel plaza, station yards).
+
 Arriving at a new venue for the first time, the crew you bring sets up the cooker, one lumberjack comes along and
 there are 12 logs on the pile. Tools, bag and boots carry over between venues; buildings, kitchen and crew are per venue.
 
