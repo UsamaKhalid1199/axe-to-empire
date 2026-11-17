@@ -14,7 +14,8 @@ var back: Stack
 var hands: Stack
 var bubble: Label3D
 var tool_root: Node3D
-var vehicle: Node3D
+var vehicle: Node3D            # the harvester while you ride it (null on foot)
+var harvester: Node3D          # owned harvester; parked in the world while you walk in camp
 var saw_disc: Node3D
 var input_dir := Vector2.ZERO
 var chopping := false
@@ -98,14 +99,11 @@ func equip_tool() -> void:
 		old_parent.remove_child(tool_root)
 		old_parent.queue_free()
 	if vehicle:
-		back.reparent(rig, false)
-		back.layout = Stack.Layout.BACK
-		back.position = BACK_POS
-		back.rotation = Vector3.ZERO
-		back.relayout()
-		vehicle.queue_free()
-		vehicle = null
-		rig.position = Vector3.ZERO
+		_dismount(false)
+	if is_instance_valid(harvester):
+		harvester.queue_free()
+	harvester = null
+	saw_disc = null
 	var node: Node3D
 	match t.id:
 		"axe":
@@ -120,15 +118,13 @@ func equip_tool() -> void:
 		"chainsaw":
 			node = Art.chainsaw()
 		"harvester":
-			vehicle = Art.harvester()
-			add_child(vehicle)
-			vehicle.rotation.y = rig.rotation.y
-			saw_disc = vehicle.find_child("Disc", true, false)
-			back.reparent(vehicle.get_node("Bed"), false)
-			back.layout = Stack.Layout.BUNK
-			back.position = Vector3.ZERO
-			back.rotation = Vector3.ZERO
-			back.relayout()
+			# parked beside you; you climb in when you walk into the forest
+			harvester = Art.harvester()
+			world.add_child(harvester)
+			harvester.global_position = PARK_POS
+			harvester.rotation.y = PI
+			saw_disc = harvester.find_child("Disc", true, false)
+			_update_ride(true)
 	if node and t.id == "chainsaw":
 		# held in front of the hips with both hands; arms are solved by IK onto the handles
 		tool_root.add_child(node)
@@ -181,6 +177,7 @@ func _physics_process(delta: float) -> void:
 		rig.rotation.y = lerp_angle(rig.rotation.y, yaw, clampf(delta * 12.0, 0.0, 1.0))
 		if vehicle:
 			vehicle.rotation.y = rig.rotation.y
+	_update_ride(false)
 	if vehicle:
 		rig.position = Vector3(sin(rig.rotation.y), 0, cos(rig.rotation.y)) * 0.35 + Vector3(0, 0.87, 0)
 	_update_chop(delta, t, inp.length() > 0.15)
@@ -194,9 +191,69 @@ func _physics_process(delta: float) -> void:
 	hands.rotation.x = back.rotation.x * -0.5
 
 
+## The harvester is only for the forest: you climb in past the tree line and step out at the camp
+## edge, so building, cooking and serving are always done on foot. The machine stays parked
+## where you left it.
+const RIDE_IN_Z := -4.6
+const RIDE_OUT_Z := -4.0
+const PARK_POS := Vector3(1.5, 0, -5.4)   # trail-side spot at the tree line, clear of the cookers
+
+
+func _update_ride(instant: bool) -> void:
+	if not is_instance_valid(harvester):
+		return
+	var z := global_position.z
+	if vehicle == null and z < RIDE_IN_Z and hands.count() == 0:
+		_mount(instant)
+	elif vehicle != null and (z > RIDE_OUT_Z or hands.count() > 0):
+		_dismount(not instant)
+
+
+func _mount(instant: bool) -> void:
+	vehicle = harvester
+	var from := harvester.global_position
+	harvester.reparent(self, false)
+	harvester.position = Vector3.ZERO
+	harvester.rotation = Vector3(0, rig.rotation.y, 0)
+	if not instant:
+		# drives up to you from where it was parked
+		var off := from - global_position
+		off.y = 0.0
+		if off.length() > 0.3:
+			harvester.position = off.limit_length(6.0)
+			var tw := create_tween()
+			tw.tween_property(harvester, "position", Vector3.ZERO, 0.28).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+		world.fx_burst(global_position + Vector3(0, 0.4, 0), Color(0.75, 0.62, 0.45), 14)
+		Sfx.play("pop", -8.0)
+	back.reparent(harvester.get_node("Bed"), false)
+	back.layout = Stack.Layout.BUNK
+	back.position = Vector3.ZERO
+	back.rotation = Vector3.ZERO
+	back.relayout()
+
+
+func _dismount(park: bool) -> void:
+	var h := vehicle
+	vehicle = null
+	back.reparent(rig, false)
+	back.layout = Stack.Layout.BACK
+	back.position = BACK_POS
+	back.rotation = Vector3.ZERO
+	back.relayout()
+	rig.position = Vector3.ZERO
+	Sfx.saw(false)
+	if park and is_instance_valid(h):
+		var yaw := rig.rotation.y
+		h.reparent(world, false)
+		# park it a step behind you, back toward the trees, so it never blocks the camp
+		h.global_position = Vector3(global_position.x, 0, minf(global_position.z - 1.2, PARK_POS.z))
+		h.rotation = Vector3(0, yaw, 0)
+		world.fx_burst(global_position + Vector3(0, 0.4, 0), Color(0.75, 0.62, 0.45), 10)
+
+
 ## Tool comes out near trees or while chopping; it is put away when serving, collecting or walking in camp.
 func _update_tool(delta: float, t: Dictionary) -> void:
-	if vehicle:
+	if is_instance_valid(harvester):
 		return
 	var want: bool = hands.count() == 0 and (chopping or not world.trees_near(global_position, float(t.range) + 1.8, 1).is_empty())
 	if want:
@@ -236,14 +293,15 @@ func _update_chop(delta: float, t: Dictionary, pushing: bool) -> void:
 	chopping = false
 	_targets.clear()
 	var cap := Game.bag_cap()
-	if hands.count() == 0 and back.count() < cap:
+	var on_foot_with_harvester := is_instance_valid(harvester) and not vehicle
+	if hands.count() == 0 and back.count() < cap and not on_foot_with_harvester:
 		var can := bool(t.move_chop) or not pushing
 		if can:
 			_targets = world.trees_near(global_position, float(t.range), int(t.aoe))
 			chopping = not _targets.is_empty()
 	if not chopping:
 		Sfx.saw(false)
-		if saw_disc:
+		if saw_disc and vehicle:
 			saw_disc.rotate_y(delta * 4.0)
 		return
 	if bool(t.move_chop):

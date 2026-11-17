@@ -8,7 +8,9 @@ Godot 4.7.2, GDScript, `gl_compatibility` renderer. Tuned for low-end phones (Po
 ## The game loop
 
 1. Chop trees (stand next to one; the axe/chainsaw comes out only near trees). Stumps regrow after 45 s,
-   and only once you've walked away, so you keep moving through the forest.
+   and only once you've walked away, so you keep moving through the forest. The harvester (top tool) is ridden
+   only in the forest: you climb in past the tree line and step out at the camp edge (it stays parked there),
+   so building, cooking and serving are always on foot.
 2. Stack logs by the cooker, carry food to the counter, serve the queue, collect coins.
 3. Build pads (tables, tool shed, crew cabin, second cooker), buy tool/bag/boots and kitchen upgrades.
 4. Hire lumberjacks (they sell surplus wood at the truck when the pile is full), waiters and cooks.
@@ -48,6 +50,7 @@ $G --headless --path . --script res://tests/flowtest.gd             # A-Z empire
 $G --headless --path . --script res://tests/autoplay.gd -- 8 60 0   # bot plays chapter 0 at 8x and prints pacing
 $G --headless --path . --script res://tests/lumbertest.gd           # lumberjacks sell surplus wood
 $G --headless --path . --script res://tests/regrowtest.gd           # stumps wait until the player leaves
+$G --headless --path . --script res://tests/harvtest.gd             # ride the harvester in the forest, walk in camp
 $G --headless --path . --script res://tests/crewzone.gd -- 2        # crew zone opens its menu in chapter 2
 $G --path . --resolution 720x1280 --script res://tests/uishot2.gd -- <outdir>   # empire / gate / complete modals
 ```

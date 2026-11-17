@@ -41,7 +41,9 @@ func slot(i: int) -> Transform3D:
 	var t := Transform3D.IDENTITY
 	match layout:
 		Layout.BACK:
-			t.origin = Vector3(0, i * 0.16, 0)
+			# a second row behind the first once the column is shoulder-high, so a full bag stays readable
+			var row := i / 14
+			t.origin = Vector3(0, (i % 14) * 0.16 + row * 0.04, -row * 0.19)
 			t.basis = Basis(Vector3.UP, 0.08 * sin(i * 1.7))
 		Layout.HANDS:
 			t.origin = Vector3(0, i * 0.1, 0)
