@@ -73,6 +73,7 @@ var jobs: Array = []                # [{id,text,goal,prog,reward,claimed}]
 var streak := 0
 var streak_last_day := ""
 var chest_claimed := false
+var chest_day := ""                 # the day the streak chest was last opened
 
 var last_save_unix := 0
 var offline_reward := 0             # computed on load, shown by UI
@@ -139,6 +140,7 @@ func _notification(what: int) -> void:
 			_compute_offline(last_save_unix)
 			last_save_unix = int(Time.get_unix_time_from_system())
 			_reno_tick()
+			refresh_jobs()                  # a new day may have started while the app was in the background
 			if offline_reward > 0:
 				offline_ready.emit()
 
@@ -263,6 +265,7 @@ func travel(k: int) -> bool:
 		return false
 	_stash()
 	var first: bool = k >= venues.size() or venues[k].is_empty()
+	_rescale_jobs(chapter_mult(venue), chapter_mult(k))
 	venue = k
 	_unstash(k)
 	cfg = chapter_cfg(k)
@@ -271,6 +274,21 @@ func travel(k: int) -> bool:
 	_rates_t = 0.0
 	save_game()
 	return true
+
+
+## Daily jobs were rolled for one chapter's prices; keep them fair when the scale changes.
+func _rescale_jobs(m_old: float, m_new: float) -> void:
+	var f := m_new / maxf(0.001, m_old)
+	if absf(f - 1.0) < 0.001:
+		return
+	for j in jobs:
+		j.reward = maxi(10, int(round(float(j.reward) * f / 10.0)) * 10)
+		if j.id == "earn" and not j.claimed:
+			var old_goal := int(j.goal)
+			j.goal = maxi(1, int(round(float(j.goal) * f)))
+			j.prog = mini(int(j.prog), int(j.goal))
+			j.text = String(j.text).replace(str(old_goal), str(j.goal))
+	jobs_changed.emit()
 
 
 ## First arrival at a new venue: the crew you brought sets up the cooker, one lumberjack comes along
@@ -375,6 +393,8 @@ func start_new_empire() -> void:
 	_unstash(0)
 	_cc_cache.clear()
 	cfg = chapter_cfg(0)
+	jobs_day = ""
+	refresh_jobs()
 	_rates.clear()
 	refresh_stars()
 	save_game()
@@ -422,11 +442,11 @@ static func kitchen_cook(cc: Dictionary, lv: int) -> float:
 
 
 static func menu_price(cc: Dictionary, lv: int) -> float:
-	return float(cc.menu[0].price) * (1.0 + 0.12 * lv) * pow(1.25, lv / 5)
+	return float(cc.menu[0].price) * (1.0 + 0.08 * lv) * pow(1.2, lv / 5)
 
 
 func dish_price() -> int:
-	return int(round(menu_price(cfg, levels.menu) * income_mult() * star_mult(venue)))
+	return int(round(menu_price(cfg, levels.menu) * sign_price() * income_mult() * star_mult(venue)))
 
 
 ## Recipe names step up as the menu grows (levels 7, 13, 19).
@@ -439,15 +459,20 @@ func dish_name() -> String:
 
 
 func dining_patience() -> float:
-	return 1.0 + 0.02 * levels.dining
+	return 1.0 + 0.03 * levels.dining
 
 
 func seated_tip() -> float:
-	return float(cfg.customers.seated_tip) + 0.01 * levels.dining
+	return float(cfg.customers.seated_tip) + 0.03 * levels.dining
 
 
 func sign_demand() -> float:
 	return 1.0 + 0.04 * levels.sign
+
+
+## A famous place charges more: the signboard also adds +2% to every dish per level.
+func sign_price(lv := -1) -> float:
+	return 1.0 + 0.02 * (levels.sign if lv < 0 else lv)
 
 
 # ---------------------------------------------------------------- station levels + renovations
@@ -459,7 +484,11 @@ func station_key(id: String) -> String:
 
 
 func station_def(key: String) -> Dictionary:
-	return cfg.stations[STATION_CFG[key]]
+	var d: Dictionary = cfg.stations[STATION_CFG[key]]
+	if key == "station" and special_type() != "":
+		d = d.duplicate()
+		d["name"] = String(special_def().get("name", d.name))   # one name everywhere: "Drive-thru window", ...
+	return d
 
 
 func station_max() -> int:
@@ -709,7 +738,7 @@ func task_done() -> bool:
 
 
 func task_reward(t: Dictionary) -> int:
-	return int(float(t.get("r", 1)) * float(menu_price(cfg, 0)) * 2.0 * income_mult())
+	return int(float(t.get("r", 1)) * dish_price() * 2.0)
 
 
 func claim_task() -> void:
@@ -814,6 +843,8 @@ func build_available(id: String) -> bool:
 
 ## Pays up to `amount` into a build pad. Returns coins actually moved.
 func pay_pad(id: String, amount: int) -> int:
+	if built.has(id) or id == "gate":
+		return 0
 	var cost := int(build_def(id).cost)
 	var left := cost - int(pad_paid.get(id, 0))
 	if left <= 0:                       # already paid in full (e.g. a cost changed in an update)
@@ -892,12 +923,14 @@ func _rate(lj: int, waiters: int, cooks: int, b: Dictionary, lv: Dictionary, cc:
 		serve_s = 0.0
 	var c: Dictionary = cc.customers
 	var nt := (2 if b.has("tables_1") else 0) + (2 if b.has("tables_2") else 0)
-	var demand_s: float = (1.0 + nt * float(c.per_table_bonus) + (nf - 1) * 0.2 + fire_lv * 0.04 + menu_lv * 0.03 + cooks * 0.12) 		* (1.0 + 0.04 * int(lv.get("sign", 0))) / float(c.interval)
+	var demand_s: float = (1.0 + nt * float(c.per_table_bonus) + (nf - 1) * 0.2 + fire_lv * 0.14 + menu_lv * 0.10 + cooks * 0.12) 		* (1.0 + 0.04 * int(lv.get("sign", 0))) / float(c.interval)
 	var dishes_s: float = min(logs_s * float(cc.dishes_per_log), cook_s, serve_s, demand_s)
 	if dishes_s <= 0.0:
 		# no waiter: logs still sell at the truck via lumberjacks? No: they only feed the pile.
 		return 0.0
-	return dishes_s * menu_price(cc, menu_lv) * income_mult()
+	var sign_lv := int(lv.get("sign", 0))
+	var tips := 1.0 + (float(c.seated_tip) + 0.03 * int(lv.get("dining", 0))) * (0.5 if nt > 0 else 0.0)   # about half the guests sit and tip
+	return dishes_s * menu_price(cc, menu_lv) * (1.0 + 0.02 * sign_lv) * tips * income_mult()
 
 
 # ---------------------------------------------------------------- daily jobs
@@ -916,7 +949,7 @@ func refresh_jobs() -> void:
 	if jobs_day == today and jobs.size() == 3:
 		return
 	jobs_day = today
-	chest_claimed = false
+	chest_claimed = chest_day == today
 	var rng := RandomNumberGenerator.new()
 	rng.seed = hash(today)
 	var pool: Array = cfg.jobs.duplicate()
@@ -928,7 +961,9 @@ func refresh_jobs() -> void:
 		var j: Dictionary = pool.pop_at(rng.randi_range(0, pool.size() - 1))
 		var goal := int(j.base) + int(j.per_day) * days_played
 		var goal_scaled := goal if j.id != "earn" else int(goal * chapter_mult(venue))
-		var reward := int(round((60 + goal * 4) * float(j.reward_mult) * (1.0 + levels.menu * 0.4) * chapter_mult(venue) / 10.0) * 10)
+		var units := goal / 10 if j.id == "earn" else goal      # "earn" goals are cash, not items
+		var menu_k := minf(4.0, menu_price(cfg, levels.menu) / maxf(1.0, menu_price(cfg, 0)))
+		var reward := int(round((60 + units * 4) * float(j.reward_mult) * menu_k * chapter_mult(venue) / 10.0) * 10)
 		goal = goal_scaled
 		jobs.append({"id": j.id, "text": String(j.text).replace("{n}", str(goal)), "goal": goal,
 			"prog": 0, "reward": reward, "claimed": false})
@@ -972,13 +1007,14 @@ func jobs_claimable() -> int:
 
 
 func streak_reward() -> int:
-	return int(cfg.streak_rewards[clampi(streak - 1, 0, 6)])
+	return int(round(float(cfg.streak_rewards[clampi(streak - 1, 0, 6)]) * chapter_mult(venue)))
 
 
 func claim_chest() -> void:
 	if chest_claimed or not jobs.all(func(x): return x.claimed):
 		return
 	chest_claimed = true
+	chest_day = _today()
 	add_coins(streak_reward(), false)
 	jobs_changed.emit()
 	save_game()
@@ -992,7 +1028,7 @@ func to_dict() -> Dictionary:
 		"levels": levels, "crew": crew, "rating_hist": rating_hist, "stats": stats,
 		"chapter_done": chapter_done, "ftue": ftue, "woodpile": woodpile, "rack": rack,
 		"counter_coins": counter_coins, "jobs_day": jobs_day, "jobs": jobs, "streak": streak,
-		"streak_last_day": streak_last_day, "chest_claimed": chest_claimed, "mute": mute, "quality": quality, "quality_auto": quality_auto,
+		"streak_last_day": streak_last_day, "chest_claimed": chest_claimed, "chest_day": chest_day, "mute": mute, "quality": quality, "quality_auto": quality_auto,
 		"sp": sp, "venue": venue, "unlocked": unlocked, "venues": _venues_for_save(), "vserved": vserved, "prestige": prestige,
 		"t": int(Time.get_unix_time_from_system()), "lv2": true, "settings": settings, "profile": profile, "offline_reward": offline_reward, "gate_refund": true,
 	}
@@ -1056,6 +1092,7 @@ func load_game() -> void:
 	streak = int(d.streak)
 	streak_last_day = d.streak_last_day
 	chest_claimed = d.chest_claimed
+	chest_day = String(d.get("chest_day", jobs_day if chest_claimed else ""))
 	mute = d.get("mute", false)
 	quality = clampi(int(d.get("quality", 1)), 0, 2)
 	quality_auto = bool(d.get("quality_auto", true))
@@ -1077,6 +1114,8 @@ func load_game() -> void:
 		levels.menu = [0, 2, 4, 6][clampi(int(levels.menu), 0, 3)]
 		for vd in venues:
 			if vd is Dictionary and not vd.is_empty():
+				if vd.get("chapter_done", false) and not vd.has("task_i"):
+					vd["task_i"] = 13
 				vd["fire"] = [0, 4, 9, 14][clampi(int(vd.get("fire", 0)), 0, 3)]
 				vd["menu"] = [0, 2, 4, 6][clampi(int(vd.get("menu", 0)), 0, 3)]
 	# per-venue long-term state lives in the venue snapshot
@@ -1088,6 +1127,8 @@ func load_game() -> void:
 	if chapter_done:
 		built["gate"] = true
 		bigday["won"] = true
+		if not d.get("lv2", false):
+			task_i = maxi(task_i, tasks().size())
 	for vd3 in venues:
 		if vd3 is Dictionary and vd3.get("chapter_done", false):
 			var b3: Dictionary = vd3.get("bigday", {})
@@ -1100,7 +1141,8 @@ func load_game() -> void:
 	# gates used to charge their savings goal; give that money back once to saves from before the fix
 	if not d.get("gate_refund", false) and unlocked > 1:
 		var back := 0
-		for k in unlocked - 1:
+		var paid_gates := unlocked - 1 + (1 if chapter_done and venue == unlocked - 1 and venue == chapters.size() - 1 else 0)
+		for k in paid_gates:
 			back += int(chapter_cfg(k).gate.coins)
 		coins += back
 		refund_note = back

@@ -330,8 +330,8 @@
      "shop"
     ],
     "bonus": 0.25,
-    "desc": "Float logs to the sawmill for 3x the truck price",
-    "intro": "New at the Lake: a timber raft. Load logs, it sails to the sawmill and pays 3x."
+    "desc": "Float logs to the sawmill: each log pays about 1.5 dishes",
+    "intro": "New at the Lake: a timber raft. Load logs, it sails to the sawmill and pays top price."
    },
    "forest": {
     "thin_east": 5.0,

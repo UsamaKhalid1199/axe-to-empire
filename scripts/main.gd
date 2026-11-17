@@ -111,6 +111,8 @@ func _frames(n: int) -> void:
 
 
 func _float_text(text: String, pos: Vector3, color: Color) -> void:
+	if world == null or not is_instance_valid(world) or not world.is_inside_tree():
+		return                          # the venue is being rebuilt (travel)
 	var l := Label3D.new()
 	l.text = text
 	l.font = UI.font_bold()

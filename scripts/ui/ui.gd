@@ -43,6 +43,23 @@ static func theme() -> Theme:
 	return t
 
 
+## Keeps a one-line label inside `max_w` pixels: shrinks the font down to `min_size`, then wraps.
+static func fit(l: Label, max_w: float, size: int, min_size: int) -> void:
+	var f: Font = l.get_theme_font("font")
+	var s := size
+	while s > min_size and f.get_string_size(l.text, HORIZONTAL_ALIGNMENT_LEFT, -1, s).x > max_w:
+		s -= 2
+	l.add_theme_font_size_override("font_size", s)
+	var w := f.get_string_size(l.text, HORIZONTAL_ALIGNMENT_LEFT, -1, s).x
+	if w > max_w:
+		l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		l.custom_minimum_size.x = max_w
+	else:
+		l.autowrap_mode = TextServer.AUTOWRAP_OFF
+		l.custom_minimum_size.x = 0
+	l.size = Vector2.ZERO
+
+
 static func label(text: String, size := 24, color := TEXT, font: Font = null, align := HORIZONTAL_ALIGNMENT_LEFT) -> Label:
 	var l := Label.new()
 	l.text = text
@@ -111,13 +128,21 @@ static func set_button_text(b: UIShape, text: String) -> void:
 
 static func fmt(n: float) -> String:
 	var v := absf(n)
-	if v >= 1_000_000:
-		return "%.2fM" % (n / 1_000_000.0)
+	for u in [[1e15, "Q"], [1e12, "T"], [1e9, "B"], [1e6, "M"]]:
+		if v >= u[0]:
+			return _trim("%.2f" % (n / u[0])) + u[1]
 	if v >= 10_000:
-		return "%.1fK" % (n / 1000.0)
+		return _trim("%.1f" % (n / 1000.0)) + "K"
 	if v >= 1000:
 		return "%d,%03d" % [int(n) / 1000, int(n) % 1000]
 	return str(int(n))
+
+
+## "16.0" -> "16", "3.40" -> "3.4"
+static func _trim(s: String) -> String:
+	if s.contains("."):
+		s = s.rstrip("0").rstrip(".")
+	return s
 
 
 ## Money as shown to players: $1,250 · $12.5K · $3.40M

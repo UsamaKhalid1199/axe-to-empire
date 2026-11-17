@@ -57,6 +57,22 @@ Hotel plaza, station yards).
 Arriving at a new venue for the first time, the crew you bring sets up the cooker, one lumberjack comes along and
 there are 12 logs on the pile. Tools, bag and boots carry over between venues; buildings, kitchen and crew are per venue.
 
+## Upgrade values (measured by `tests/upgradetest.gd`)
+
+| Upgrade | Effect per level | Notes |
+|---|---|---|
+| Boots | x1.12 / x1.25 / x1.40 run speed | measured exactly |
+| Backpack | 10 / 14 / 18 / 26 / 36 logs | measured exactly |
+| Tools | axe 1.25, double axe 2.5, chainsaw 6 logs/s; harvester clears 4 trees | |
+| Kitchen | -5% cook time, +14% guest demand | best when the kitchen is the bottleneck |
+| Menu | +8% price, x1.2 every 5 levels | best buy: +5 levels pay back in 3-5 min |
+| Dining | +3% patience, +3% tips | +8-24% income per 5 levels |
+| Signboard | +4% guests, +2% price | |
+| Signature station | +4% station pay, crew uses it from Lv 5 | crew only takes dishes the counter can spare |
+
+Live crew income (no player) with every station +5 levels pays back in 3-70 minutes in every chapter.
+Background venues earn 50% and away earnings 25% of the conservative crew model in `Game._rate()`.
+
 ## Layout
 
 | Path | What it is |
@@ -82,6 +98,10 @@ $G --headless --path . --script res://tests/flowtest.gd             # A-Z empire
 $G --headless --path . --script res://tests/autoplay.gd -- 8 60 0   # bot plays chapter 0 at 8x and prints pacing
 $G --headless --path . --script res://tests/lumbertest.gd           # lumberjacks stack logs and rest (never sell)
 $G --headless --path . --script res://tests/wardrobetest.gd         # wardrobe buy/equip/persist
+$G --headless --path . --script res://tests/audittest.gd            # regressions: level cap, star-3 replay, cash pickup, gate keeps cash
+$G --headless --path . -s res://tests/upgradetest.gd -- <chapter>   # every upgrade measured in game + live income/payback per station
+$G --headless --path . -s res://tests/qa/qa4_input.gd               # taps: X buttons, second finger, taps during rebuild/close/double-tap
+$G --headless --path . -s res://tests/qa/chapters_flow.gd           # next/previous chapter, travel, save/load, migration (~110 checks)
 $G --headless --path . --script res://tests/regrowtest.gd           # stumps wait until the player leaves
 $G --headless --path . --script res://tests/harvtest.gd             # ride the harvester in the forest, walk in camp
 $G --headless --path . --script res://tests/specialtest.gd -- 1     # signature station of chapter 1..5 (player + crew)

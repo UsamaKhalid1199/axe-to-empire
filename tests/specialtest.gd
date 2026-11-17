@@ -74,8 +74,8 @@ func _run() -> void:
 			ok(p.back.count() == 0, "logs went from the back onto the raft")
 			g.sp["away"] = 0.3
 			await create_timer(1.0).timeout
-			var want := int(round(16 * int(g.cfg.log_sell_price) * 3 * sp.boost()))
-			ok(g.coins - c0 == want, "raft paid 3x the truck price (%d, want %d)" % [g.coins - c0, want])
+			var want := int(round(16 * sp.raft_log_price()))
+			ok(g.coins - c0 == want, "raft paid 1.5 dishes per log (%d, want %d)" % [g.coins - c0, want])
 			# crew: lumberjacks send surplus to the raft when the woodpile is full
 			g.woodpile = int(g.cfg.woodpile_cap)
 			w.pile.set_count(g.woodpile)

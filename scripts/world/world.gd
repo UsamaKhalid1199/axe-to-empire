@@ -681,12 +681,13 @@ func _rebuild_all(animate: bool) -> void:
 		var id: String = b.id
 		if Game.built.has(id) and not buildings.has(id) and id != "gate":
 			_spawn_building(id, animate)
-		if pads.has(id) and (Game.built.has(id) or not Game.build_available(id)):
-			if Game.built.has(id) or id != "gate":
-				zones.erase(pads[id])
-				pads[id].queue_free()
-				pads.erase(id)
-		if not pads.has(id) and Game.build_available(id):
+		# the gate pad stays after the road opens: it holds the Big Day replay (star 3) and, in the
+		# last chapter, the way to a New Empire
+		if pads.has(id) and id != "gate" and (Game.built.has(id) or not Game.build_available(id)):
+			zones.erase(pads[id])
+			pads[id].queue_free()
+			pads.erase(id)
+		if not pads.has(id) and (Game.build_available(id) or (id == "gate" and Game.built.has("gate"))):
 			_spawn_pad(id, animate)
 	_sync_workers()
 
@@ -1160,7 +1161,8 @@ func card_paid(at: Vector3, amount: int, score: float, guests: int) -> void:
 ## Where a waiter should take dishes: the counter, or the drive-thru / van when it needs them.
 func waiter_sink(idx: int) -> String:
 	var need: int = specials.dish_need() if specials.crew_allowed() else 0
-	if need > 0 and (idx == 1 or counter_count() >= 3 or queue.is_empty()):
+	# the station only gets dishes the counter can spare: guests in line come first
+	if need > 0 and (counter_count() >= 3 or queue.is_empty()):
 		return "special"
 	return "counter"
 

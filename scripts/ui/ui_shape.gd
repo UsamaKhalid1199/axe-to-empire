@@ -61,6 +61,8 @@ func _apply() -> void:
 	_mat.set_shader_parameter("pad", PAD)
 	_mat.set_shader_parameter("shadow", shadow)
 	_mat.set_shader_parameter("dim", 0.75 if disabled else 0.0)
+	if clickable:
+		modulate = Color(0.78, 0.78, 0.78, 0.6) if disabled else Color.WHITE   # disabled buttons read as greyed out
 	_on_resized()
 
 
@@ -84,8 +86,35 @@ var _press_pos := Vector2.ZERO
 var _down := false
 
 
+var _touch_idx := -1
+
+
 func _gui_input(e: InputEvent) -> void:
 	if not clickable:
+		return
+	# extra fingers (index >= 1) get no emulated mouse events, so handle them here
+	# (e.g. tapping a button with one thumb while the other still holds the joystick)
+	if e is InputEventScreenTouch and e.index >= 1:
+		if e.pressed:
+			_touch_idx = e.index
+			_down = true
+			_press_pos = e.position
+			var tw0 := create_tween()
+			tw0.tween_property(self, "scale", Vector2(0.94, 0.94), 0.06)
+		elif _down and e.index == _touch_idx:
+			_touch_idx = -1
+			_down = false
+			accept_event()
+			var tw1 := create_tween()
+			tw1.tween_property(self, "scale", Vector2.ONE, 0.18).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+			if Rect2(Vector2.ZERO, size).grow(24.0).has_point(e.position):
+				if disabled:
+					Sfx.play("click", -10.0, 0.7)
+				else:
+					Sfx.play("click")
+					pressed.emit()
+			return
+		accept_event()
 		return
 	if e is InputEventMouseButton and e.button_index == MOUSE_BUTTON_LEFT:
 		if e.pressed:
@@ -98,7 +127,7 @@ func _gui_input(e: InputEvent) -> void:
 			accept_event()          # before emitting: a handler may free this button (modal rebuild/close)
 			var tw2 := create_tween()
 			tw2.tween_property(self, "scale", Vector2.ONE, 0.18).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
-			if Rect2(Vector2.ZERO, size).has_point(e.position):
+			if Rect2(Vector2.ZERO, size).grow(24.0).has_point(e.position):   # a finger that rolls a little off still counts
 				if disabled:
 					Sfx.play("click", -10.0, 0.7)
 				else:

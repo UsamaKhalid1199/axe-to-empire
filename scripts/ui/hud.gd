@@ -65,7 +65,7 @@ func _ready() -> void:
 	world.big_day_finished.connect(func(won, served, goal):
 		_bd_result = [won, served, goal]
 		open_modal("bigday_result"))
-	Game.coins_changed.connect(func(_v): _refresh_modal_soft())
+	Game.coins_changed.connect(func(_v): _on_coins_for_modal())
 	Game.rating_changed.connect(func(_v): _refresh_top())
 	Game.state_changed.connect(_refresh_modal_soft)
 	Game.jobs_changed.connect(_refresh_jobs_badge)
@@ -86,10 +86,18 @@ func _ready() -> void:
 		pass
 
 
+func _side_button_at(p: Vector2) -> UIShape:
+	for holder in jobs_btn.get_parent().get_parent().get_children():
+		for c in [holder] + holder.get_children():
+			if c is UIShape and c.is_visible_in_tree() and c.get_global_rect().has_point(p):
+				return c
+	return null
+
+
 func _ui_hit(p: Vector2) -> bool:
 	if modal != null:
 		return true
-	for c in jobs_btn.get_parent().get_parent().get_children() + [task_btn, task_card]:
+	for c in jobs_btn.get_parent().get_parent().get_children() + [task_btn, task_card, reno_chip]:
 		if c is Control and c.is_visible_in_tree() and c.get_global_rect().has_point(p):
 			return true
 	return false
@@ -196,7 +204,11 @@ func _build_side() -> void:
 	badge.size = Vector2(34, 34)
 	side.add_child(_round_button("upgrade", "UPGRADE", func(): open_modal("upgrades")))
 	side.add_child(_round_button("character", "ME", func(): open_modal("character")))
-	map_btn = _round_button("gate", "MAP", func(): open_modal("empire"))
+	map_btn = _round_button("gate", "MAP", func():
+		if world.bd_active:
+			show_toast("Finish the Big Day first!")
+		else:
+			open_modal("empire"))
 	map_btn.visible = Game.unlocked > 1
 	side.add_child(map_btn)
 	side.add_child(_round_button("settings", "", func(): open_modal("settings")))
@@ -218,17 +230,22 @@ func _round_button(icon_name: String, text: String, cb: Callable) -> UIShape:
 
 
 func _build_toast() -> void:
-	var c := CenterContainer.new()
-	c.set_anchors_preset(Control.PRESET_CENTER_TOP)
+	var c := Control.new()          # plain holder; the box is centred by hand so long text can't push it off-screen
+	c.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
 	c.position.y = _safe_top() + 330
 	c.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	root.add_child(c)
 	toast_box = UIShape.new("gold", 24.0, Vector4(26, 12, 26, 12))
 	toast_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	toast_label = UI.label("", 30, UI.INK, UI.font_bold())
+	toast_label = UI.label("", 30, UI.INK, UI.font_bold(), HORIZONTAL_ALIGNMENT_CENTER)
 	toast_box.add_child(toast_label)
 	c.add_child(toast_box)
 	toast_box.modulate.a = 0.0
+
+
+## Width of the HUD in UI pixels (what anchors and positions use).
+func _vw() -> float:
+	return get_viewport().get_visible_rect().size.x
 
 
 func show_toast(text: String) -> void:
@@ -259,20 +276,33 @@ func _process(delta: float) -> void:
 	var g: String = world.objective.text
 	if goal_label.text != g:
 		goal_label.text = g
+		UI.fit(goal_label, _vw() - 140.0, 28, 20)
+		goal_pill.reset_size()
 		goal_pill.visible = g != ""
 		goal_pill.scale = Vector2(1.08, 1.08)
 		goal_pill.create_tween().tween_property(goal_pill, "scale", Vector2.ONE, 0.25)
+	# a lost touch release (app paused mid-tap) must not freeze modal refreshes
+	if _fingers > 0 and Time.get_ticks_msec() - _finger_ms > 4000:
+		_fingers = 0
+		if _rebuild_pending and modal:
+			_rebuild_pending = false
+			_rebuild_modal_now()
 	# toasts
 	_toast_t -= delta
 	if _toast_t <= 0.0 and not _toast_q.is_empty():
 		toast_label.text = _toast_q.pop_front()
-		_toast_t = 2.2
+		UI.fit(toast_label, _vw() - 300.0, 30, 24)   # clear of the side buttons
+		toast_box.size = Vector2.ZERO
+		toast_box.size = toast_box.get_combined_minimum_size()
+		toast_box.position = Vector2((_vw() - toast_box.size.x) * 0.5, 0.0)
+		toast_box.pivot_offset = toast_box.size * 0.5
+		_toast_t = 2.2 + 0.03 * maxf(0.0, toast_label.text.length() - 30.0)
 		var tw := create_tween()
 		toast_box.modulate.a = 0.0
 		toast_box.scale = Vector2(0.8, 0.8)
 		tw.tween_property(toast_box, "modulate:a", 1.0, 0.15)
 		tw.parallel().tween_property(toast_box, "scale", Vector2.ONE, 0.25).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
-		tw.tween_interval(1.6)
+		tw.tween_interval(_toast_t - 0.6)
 		tw.tween_property(toast_box, "modulate:a", 0.0, 0.3)
 
 
@@ -286,7 +316,7 @@ func _refresh_jobs_badge() -> void:
 	badge.visible = n > 0
 	jobs_badge.text = str(n)
 	if modal_kind == "jobs":
-		_rebuild_modal()
+		_safe_rebuild()
 
 
 # ------------------------------------------------------------------ zones -> panels
@@ -306,6 +336,8 @@ func _on_zone_exited(kind: String, _id: String) -> void:
 # ------------------------------------------------------------------ modal framework
 
 func open_modal(kind: String) -> void:
+	if kind == "jobs":
+		Game.refresh_jobs()             # roll over to today's jobs if the day changed
 	if modal:
 		modal.queue_free()
 	modal_kind = kind
@@ -318,11 +350,25 @@ func open_modal(kind: String) -> void:
 	var dim := ColorRect.new()
 	dim.color = Color(0, 0, 0, 0.45)
 	dim.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_modal_opened_ms = Time.get_ticks_msec()
+	_dim_down = false
 	dim.gui_input.connect(func(e):
-		if e is InputEventMouseButton and e.pressed and not kind in ["offline", "complete", "empire", "story", "bigday_result"]:
-			close_modal())
+		if kind in ["offline", "complete", "empire", "story", "bigday_result"]:
+			return
+		var is_press: bool = (e is InputEventMouseButton and e.button_index == MOUSE_BUTTON_LEFT) or (e is InputEventScreenTouch and e.index >= 1)
+		if not is_press:
+			return
+		if e.pressed:
+			_dim_down = Time.get_ticks_msec() - _modal_opened_ms > 300
+		elif _dim_down:
+			_dim_down = false
+			var hit := _side_button_at(dim.get_global_transform() * e.position)
+			close_modal()
+			if hit:
+				hit.pressed.emit())
 	modal.add_child(dim)
-	_rebuild_modal()
+	_rebuild_queued = false
+	_rebuild_modal_now()
 	modal.modulate.a = 0.0
 	var tw := create_tween()
 	tw.tween_property(modal, "modulate:a", 1.0, 0.15)
@@ -332,6 +378,9 @@ func open_modal(kind: String) -> void:
 func close_modal() -> void:
 	if modal:
 		var m := modal
+		m.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		for cc in m.find_children("*", "Control", true, false):
+			cc.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		var tw := create_tween()
 		tw.tween_property(m, "modulate:a", 0.0, 0.12)
 		tw.tween_callback(m.queue_free)
@@ -346,16 +395,72 @@ func close_modal() -> void:
 
 
 func _refresh_modal_soft() -> void:
-	if modal_kind in ["shop", "crew", "gate", "upgrades", "character"]:
-		_rebuild_modal()
+	if modal_kind in ["shop", "crew", "gate", "upgrades", "character", "bigday_result"]:
+		_safe_rebuild()
 
 
+## Rebuilding frees the buttons, so never do it while a finger is down (the tap would be lost).
+func _safe_rebuild() -> void:
+	if _fingers > 0:
+		_rebuild_pending = true
+	else:
+		_rebuild_modal_now()
+
+
+## Cash changes many times a second: only flip price buttons on/off, no rebuild.
+func _on_coins_for_modal() -> void:
+	for pb in _price_btns:
+		if is_instance_valid(pb[0]):
+			pb[0].disabled = Game.coins < int(pb[1])
+	if modal_kind == "gate" and Time.get_ticks_msec() - _gate_refresh_ms > 1000:
+		_gate_refresh_ms = Time.get_ticks_msec()
+		_safe_rebuild()
+
+
+var _fingers := 0
+var _finger_ms := 0
+var _rebuild_pending := false
+var _price_btns: Array = []
+var _gate_refresh_ms := 0
+var _modal_opened_ms := 0
+var _dim_down := false
+
+
+func _input(e: InputEvent) -> void:
+	if e is InputEventScreenTouch:
+		_fingers = maxi(0, _fingers + (1 if e.pressed else -1))
+		_finger_ms = Time.get_ticks_msec()
+		if not e.pressed and _fingers == 0 and _rebuild_pending:
+			_rebuild_pending = false
+			(func(): if modal: _rebuild_modal_now()).call_deferred()    # after the button has seen the release
+
+
+var _rebuild_queued := false
+
+
+## Rebuild the open modal at the end of this frame. Button handlers call this, so the button that
+## is still emitting `pressed` is never freed under its own signal.
 func _rebuild_modal() -> void:
+	if _rebuild_queued:
+		return
+	_rebuild_queued = true
+	_rebuild_modal_now.call_deferred()
+
+
+func _rebuild_modal_now() -> void:
+	_rebuild_queued = false
 	if modal == null:
 		return
 	var old := modal.get_node_or_null("Card")
+	var scroll := -1
 	if old:
+		var sc: Array = old.find_children("*", "ScrollContainer", true, false)
+		if not sc.is_empty():
+			scroll = sc[0].scroll_vertical
 		old.free()
+	_price_btns.clear()
+	if scroll > 0:
+		_restore_scroll.call_deferred(scroll)
 	var center := CenterContainer.new()
 	center.name = "Card"
 	center.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -363,6 +468,8 @@ func _rebuild_modal() -> void:
 	modal.add_child(center)
 	var card := UIShape.new("glass_strong", 30.0, Vector4(26, 24, 26, 28))
 	card.custom_minimum_size.x = minf(660.0, root.get_viewport_rect().size.x - 36.0)
+	card.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	card.clip_contents = false
 	card.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	center.add_child(card)
 	var v := UI.vbox(16)
@@ -389,15 +496,19 @@ func _header(v: VBoxContainer, icon_name: String, title: String, sub := "", clos
 	h.alignment = BoxContainer.ALIGNMENT_BEGIN
 	h.add_child(UI.icon(icon_name, 64))
 	var tv := UI.vbox(0)
-	tv.add_child(UI.label(title, 46, Color.WHITE, UI.font_bold()))
+	var tl := UI.label(title, 46, Color.WHITE, UI.font_bold())
+	tv.add_child(tl)
 	if sub != "":
-		tv.add_child(UI.label(sub, 22, UI.MUTED))
+		var sl := UI.label(sub, 22, UI.MUTED)
+		sl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		sl.custom_minimum_size.x = 120
+		tv.add_child(sl)
 	tv.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	h.add_child(tv)
 	if closable:
 		var x := UIShape.new("dark", 22.0, Vector4(16, 6, 16, 6)).make_clickable()
 		x.add_child(UI.label("✕", 30, Color.WHITE, UI.font_ui(600), HORIZONTAL_ALIGNMENT_CENTER))
-		x.custom_minimum_size = Vector2(60, 60)
+		x.custom_minimum_size = Vector2(84, 84)
 		x.pressed.connect(close_modal)
 		h.add_child(x)
 	v.add_child(h)
@@ -432,6 +543,18 @@ func _row(v: VBoxContainer, icon_name: String, title: String, desc: String, stat
 	v.add_child(r)
 
 
+func _restore_scroll(v: int) -> void:
+	if modal == null:
+		return
+	var card := modal.get_node_or_null("Card")
+	if card:
+		var sc: Array = card.find_children("*", "ScrollContainer", true, false)
+		if not sc.is_empty():
+			await get_tree().process_frame
+			if is_instance_valid(sc[0]):
+				sc[0].scroll_vertical = v
+
+
 func _price_button(cost: int, cb: Callable, label_override := "") -> UIShape:
 	var b: UIShape
 	if label_override != "":
@@ -440,6 +563,7 @@ func _price_button(cost: int, cb: Callable, label_override := "") -> UIShape:
 		return b
 	b = UI.button(UI.cash(cost), "gold", "", 30, 150)
 	b.disabled = Game.coins < cost
+	_price_btns.append([b, cost])
 	b.pressed.connect(func():
 		if Game.coins >= cost:
 			cb.call()
@@ -564,7 +688,7 @@ func _offline(v: VBoxContainer) -> void:
 	_header(v, "clock", "While you were away", "", false)
 	var mins := Game.offline_seconds / 60
 	var t := "%dh %02dm" % [mins / 60, mins % 60]
-	v.add_child(UI.label("Your crew kept the camp running for %s." % t, 24, UI.MUTED, null, HORIZONTAL_ALIGNMENT_CENTER))
+	v.add_child(UI.label("Your crew kept your places running for %s." % t, 24, UI.MUTED, null, HORIZONTAL_ALIGNMENT_CENTER))
 	var amt := UI.hbox(12)
 	amt.add_child(UI.icon("coin", 84))
 	amt.add_child(UI.num(UI.cash(Game.offline_reward), 84, UI.CASH))
@@ -591,17 +715,17 @@ func _gate(v: VBoxContainer) -> void:
 	var s := Game.gate_status()
 	var need_built: Array = ["tables_2", "crew_hut"] + (["special"] if Game.special_type() != "" else [])
 	var reqs := [
-		[s.built, "Build every camp upgrade", "%d / %d" % [need_built.filter(func(id): return Game.built.has(id)).size(), need_built.size()]],
-		[s.served, "Serve %d guests" % int(g.served), "%d / %d" % [Game.vserved, int(g.served)]],
+		[s.built, "Build every upgrade here", "%d / %d" % [need_built.filter(func(id): return Game.built.has(id)).size(), need_built.size()]],
+		[s.served, "Serve %d guests" % int(g.served), "%d / %d" % [mini(Game.vserved, int(g.served)), int(g.served)]],
 		[s.rating, "Keep a %.1f★ rating" % float(g.rating), "%.1f now" % Game.rating()],
-		[s.coins, "Save %s" % UI.cash(int(g.coins)), "%s / %s" % [UI.cash(Game.coins), UI.cash(int(g.coins))]],
+		[s.coins, "Save %s (you keep it)" % UI.cash(int(g.coins)), "%s / %s" % [UI.cash(mini(Game.coins, int(g.coins))), UI.cash(int(g.coins))]],
 		[s.bigday, "Win the Big Day: " + String(Game.big_day_def().get("name", "")), "WON" if s.bigday else ("ready" if s.built else "build first")],
 	]
 	for r in reqs:
 		var row := UIShape.new("dark", 20.0, Vector4(14, 10, 16, 10))
 		var h := UI.hbox(14)
 		h.alignment = BoxContainer.ALIGNMENT_BEGIN
-		h.add_child(UI.icon("check" if r[0] else "lock", 46))
+		h.add_child(UI.icon("check" if r[0] else ("bigday" if r[2] == "ready" else "lock"), 46))
 		var lab := UI.label(r[1], 26, Color.WHITE, UI.font_ui(600))
 		lab.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		h.add_child(lab)
@@ -612,8 +736,7 @@ func _gate(v: VBoxContainer) -> void:
 		var replay: bool = Game.bigday.get("won", false)
 		var bdd: Dictionary = Game.big_day_def()
 		var info := UI.label("%s: %s
-Serve %d guests in %d:%02d. More than %d walkouts and it's over.
-%s" % [String(bdd.name), String(bdd.desc), int(bdd.goal), int(bdd.seconds) / 60, int(bdd.seconds) % 60, int(bdd.get("max_walkouts", 10)), "Replay it with no walkouts to earn the third star." if replay else "Tip: fill the woodpile and the rack first!"], 22, UI.GOLD_LIGHT, null, HORIZONTAL_ALIGNMENT_CENTER)
+Serve %d guests in %d:%02d. More than %d walkouts and it's over. %s" % [String(bdd.name), String(bdd.desc), int(bdd.goal), int(bdd.seconds) / 60, int(bdd.seconds) % 60, int(bdd.get("max_walkouts", 10)), "Replay it with no walkouts to earn the third star." if replay else "Tip: fill the woodpile and the rack first!"], 22, UI.GOLD_LIGHT, null, HORIZONTAL_ALIGNMENT_CENTER)
 		info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		v.add_child(info)
 		var cool: float = world._bd_cool
@@ -624,6 +747,12 @@ Serve %d guests in %d:%02d. More than %d walkouts and it's over.
 				close_modal()
 				Game.fire_story("bigday_start"))
 		v.add_child(sb)
+	if Game.chapter_done:
+		# road already open: send the player on (or to the New Empire screen in the last chapter)
+		var go := UI.button("START A NEW EMPIRE" if last else "TRAVEL TO " + String(nx.name).to_upper(), "green", "gate", 30)
+		go.pressed.connect(func(): open_modal("complete" if last else "empire"))
+		v.add_child(go)
+		return
 	var b := UI.button("COMPLETE THE EMPIRE" if last else "UNLOCK " + String(nx.name).to_upper(), "green", "gate", 30)
 	b.disabled = not Game.gate_ready()
 	b.pressed.connect(func():
@@ -645,8 +774,8 @@ func _complete(v: VBoxContainer) -> void:
 	grid.add_theme_constant_override("h_separation", 14)
 	grid.add_theme_constant_override("v_separation", 14)
 	var mins := int(Game.stats.play_s / 60.0)
-	for s in [["Trees felled", str(int(Game.stats.trees))], ["Guests served", str(Game.served)],
-			["Cash earned", UI.cash(Game.stats.earned)], ["Time played", "%dh %02dm" % [mins / 60, mins % 60]]]:
+	for s in [["Guests served here", str(Game.vserved)], ["Stars here", "%d / 3" % Game.star_count()],
+			["Cash earned (all)", UI.cash(Game.stats.earned)], ["Time played (all)", "%dh %02dm" % [mins / 60, mins % 60]]]:
 		var c := UIShape.new("dark", 20.0, Vector4(18, 12, 18, 12))
 		c.custom_minimum_size.x = 285
 		var cv := UI.vbox(0)
@@ -660,7 +789,7 @@ func _complete(v: VBoxContainer) -> void:
 		txt = "You built the whole Timber Empire! Start a New Empire in a new valley: everything resets, but every dollar you earn is worth +50% more, forever."
 	else:
 		var nx: Dictionary = Game.chapters[Game.venue + 1]
-		txt = "%s is open: %s. New there: %s. It's a brand-new place, so you build it up from scratch, but your %s comes with you, and your crew here keeps earning for you." % [nx.name, String(nx.tagline).to_lower(), String(nx.get("special", {}).get("name", "")).to_lower(), UI.cash(Game.coins)]
+		txt = "%s is open: %s. New there: the %s. It's a brand-new place, so you build it up from scratch, but your %s comes with you, and your crew here keeps earning for you." % [nx.name, String(nx.tagline).to_lower(), String(nx.get("special", {}).get("name", "")).to_lower(), UI.cash(Game.coins)]
 	var l := UI.label(txt, 22, UI.MUTED, null, HORIZONTAL_ALIGNMENT_CENTER)
 	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	v.add_child(l)
@@ -822,7 +951,7 @@ func _tick_overlays() -> void:
 	if bd_on:
 		var left := maxi(0, ceili(world.bd_left))
 		bd_title.text = "%s · %d:%02d" % [String(world.bd.get("name", "")).to_upper(), left / 60, left % 60]
-		bd_info.text = "Served %d / %d   ·   walkouts %d / %d" % [world.bd_served, world.bd_goal(), world.bd_walkouts, world.bd_max_walkouts()]
+		bd_info.text = "Served %d / %d   ·   Walkouts %d / %d" % [world.bd_served, world.bd_goal(), world.bd_walkouts, world.bd_max_walkouts()]
 		bd_bar.max_value = world.bd_goal()
 		bd_bar.value = world.bd_served
 	if _ov_t > 0.0:
@@ -877,7 +1006,7 @@ func _build_bd_banner() -> void:
 func _bigday_result(v: VBoxContainer) -> void:
 	var won: bool = _bd_result[0] if _bd_result.size() > 0 else false
 	var bdd: Dictionary = Game.big_day_def()
-	_header(v, "trophy" if won else "clock", ("%s won!" if won else "%s: not this time") % String(bdd.get("name", "Big Day")),
+	_header(v, "trophy" if won else "clock", ("Big Day won: %s" if won else "%s: not this time") % String(bdd.get("name", "Big Day")),
 		"Served %d of %d" % [_bd_result[1], _bd_result[2]] if _bd_result.size() > 2 else "", false)
 	var st: Array = Game.stars()
 	var row := UI.hbox(18)
@@ -959,10 +1088,10 @@ const STATION_ICONS := {"fire": "fire", "menu": "menu", "dining": "smile", "sign
 func _station_effect(key: String, lv: int) -> String:
 	match key:
 		"fire": return "%.1fs per dish" % Game.kitchen_cook(Game.cfg, lv)
-		"menu": return "%s a dish" % UI.cash(roundf(Game.menu_price(Game.cfg, lv) * Game.income_mult()))
-		"dining": return "+%d%% patience, %d%% tips" % [2 * lv, int(round((float(Game.cfg.customers.seated_tip) + 0.01 * lv) * 100))]
-		"sign": return "+%d%% guests" % (4 * lv)
-		"station": return "+%d%% station pay%s" % [4 * lv, " · crew helps" if lv >= 4 else ""]
+		"menu": return "%s a dish" % UI.cash(roundf(Game.menu_price(Game.cfg, lv) * Game.sign_price() * Game.income_mult() * Game.star_mult()))
+		"dining": return ("+%d%% patience, " % (3 * lv) if lv > 0 else "") + "%d%% tips" % int(round((float(Game.cfg.customers.seated_tip) + 0.03 * lv) * 100))
+		"sign": return "+%d%% guests, +%d%% price" % [4 * lv, 2 * lv] if lv > 0 else "Base guests and price"
+		"station": return ("+%d%% station pay" % (4 * lv) if lv > 0 else "Base pay") + (" · crew helps" if lv >= 4 else "")
 	return ""
 
 
@@ -1006,7 +1135,8 @@ func _upgrades(v: VBoxContainer) -> void:
 			btn = _price_button(0, Callable(), "MAX")
 		elif lock != "":
 			btn = _price_button(0, Callable(), lock if lock.length() < 14 else "LOCKED")
-			stat += "\n" + lock
+			if lock.length() >= 14:
+				stat += "\n" + lock
 		else:
 			stat += "  →  " + _station_effect(key, lv + 1)
 			var secs := Game.reno_seconds(lv + 2)
@@ -1017,7 +1147,7 @@ func _upgrades(v: VBoxContainer) -> void:
 				if Game.station_upgrade(kk):
 					_rebuild_modal())
 		_row(list, STATION_ICONS.get(key, "star"), title, String(d.desc), stat, btn)
-	var info := UI.label("★ Big Day won   ★ 4.5★ rating held   ★ every station Lv 15 + a Big Day with no walkouts.\nEvery star: +4% income everywhere.", 19, UI.MUTED, null, HORIZONTAL_ALIGNMENT_CENTER)
+	var info := UI.label("Star 1: win the Big Day.  Star 2: serve twice the gate's guests with a 4.5 rating.  Star 3: a Big Day with no walkouts and every station at Lv 15+.  Each star: +4% income everywhere.", 19, UI.MUTED, null, HORIZONTAL_ALIGNMENT_CENTER)
 	info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	v.add_child(info)
 
@@ -1146,9 +1276,9 @@ func _settings(v: VBoxContainer) -> void:
 	_toggle(v, "book", "Story cards", Game.settings.get("story", true), func(): Game.settings.story = not Game.settings.get("story", true))
 	_toggle(v, "stats", "Show FPS", Game.settings.get("show_fps", false), func(): Game.settings.show_fps = not Game.settings.get("show_fps", false))
 	if OS.has_feature("mobile") or OS.get_cmdline_user_args().has("mobile"):
-		var gq := UI.button("Graphics: " + String(Game.QUALITY_NAMES[Game.quality]) + (" (auto)" if Game.quality_auto else ""), "dark", "", 28)
+		var gq := UI.button("Graphics: " + String(Game.QUALITY_NAMES[Game.quality]) + (" (auto)" if Game.quality_auto else "") + "  ›", "dark", "", 28)
 		gq.pressed.connect(func():
-			Game.quality = (Game.quality + 2) % 3
+			Game.quality = (Game.quality + 1) % 3
 			Game.quality_auto = false
 			Game.save_game()
 			get_tree().current_scene.apply_quality()
@@ -1175,7 +1305,7 @@ func _settings(v: VBoxContainer) -> void:
 			_confirm_reset = true
 			_rebuild_modal())
 	v.add_child(rs)
-	var cr := UI.label("Axe to Empire v%s · BigoSoft\nMusic-free build · Fonts: Inter, Barlow Condensed (OFL)" % str(ProjectSettings.get_setting("application/config/version")), 18, UI.MUTED, null, HORIZONTAL_ALIGNMENT_CENTER)
+	var cr := UI.label("Axe to Empire v%s · BigoSoft\nFonts: Inter, Barlow Condensed (OFL)" % str(ProjectSettings.get_setting("application/config/version")), 18, UI.MUTED, null, HORIZONTAL_ALIGNMENT_CENTER)
 	v.add_child(cr)
 
 

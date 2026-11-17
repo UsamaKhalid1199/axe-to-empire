@@ -418,7 +418,7 @@ func _tick_raft(delta: float) -> void:
 
 func _raft_depart() -> void:
 	var n := raft_stack.count()
-	Game.sp["paid"] = int(round(n * int(Game.cfg.log_sell_price) * 3 * boost()))
+	Game.sp["paid"] = int(round(n * raft_log_price()))
 	Game.sp["away"] = RAFT_AWAY
 	Game.sp["raft"] = 0
 	var tw := raft.create_tween()
@@ -442,7 +442,7 @@ func _raft_return() -> void:
 	tw.tween_property(raft, "position", RAFT_POS, 2.5).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
 	if paid > 0:
 		Game.add_coins(paid)
-		Game.stats.sold += paid / maxi(1, int(Game.cfg.log_sell_price) * 3)
+		Game.stats.sold += int(paid / maxf(1.0, raft_log_price()))
 		world.float_text.emit("SAWMILL +%s" % UI.fmt(paid), RAFT_DOCK + Vector3(0, 2.4, 0), UI.GOLD_LIGHT)
 		Game.toast.emit("Raft is back: +%s" % UI.cash(paid))
 		Sfx.play("cash", -4.0)
@@ -561,7 +561,7 @@ func _van_return() -> void:
 	tw.tween_property(van, "position", VAN, 1.2).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 	if paid > 0:
 		world.card_paid(VAN, paid, 5.0, n)
-		Game.toast.emit("Room service paid +%s" % UI.fmt(paid))
+		Game.toast.emit("Room service paid +%s" % UI.cash(paid))
 
 
 # ------------------------------------------------------------------ player and crew hand-offs
@@ -664,6 +664,11 @@ func log_put(s: Stack) -> bool:
 # ------------------------------------------------------------------ effects on guests
 
 ## Station level: every level makes the station pay 4% more.
+## What the sawmill pays per rafted log: about 1.5 dishes' worth (cooking it is ~2 dishes, but needs the kitchen).
+func raft_log_price() -> float:
+	return Game.dish_price() * 1.5 * boost()
+
+
 func boost() -> float:
 	return 1.0 + 0.04 * Game.levels.station
 
@@ -716,7 +721,7 @@ func objective(p: Player) -> Dictionary:
 				return {"text": "Load the room-service van (pays 2x)", "pos": dish_pos()}
 		"raft":
 			if p.back.count() > 0 and log_need() > 0 and (world.pile_full() or p.back.count() >= Game.bag_cap()):
-				return {"text": "Load the timber raft (3x price)", "pos": log_pos()}
+				return {"text": "Load the timber raft (top price per log)", "pos": log_pos()}
 		"fireplace":
 			var fuel := int(Game.sp.get("fuel", 0))
 			if p.back.count() > 0 and fuel < 5 and Game.woodpile >= 4:
