@@ -73,6 +73,74 @@ static func _no_shadow_small(n: Node) -> void:
 		_no_shadow_small(c)
 
 
+static var merge_enabled := true      # tests can turn static merging off for A/B comparisons
+
+
+## Static batching for props built from many boxes/cylinders: bakes every plain MeshInstance3D under `root`
+## into one mesh with one surface per material, so a prop costs one draw per material instead of one per part.
+## Subtrees whose node name is in `skip` (moving parts) are left alone, and so are imported meshes with LODs
+## (merging would drop the LODs and multiply the triangle count). Merged parts are freed (or just lose their
+## mesh when they have children). Call before anything else references the parts. Returns the merged
+## instance, or null when there was nothing worth merging.
+static func merge_static(root: Node3D, skip: Array = []) -> MeshInstance3D:
+	if not merge_enabled:
+		return null
+	var tools := {}          # material -> SurfaceTool
+	var order: Array = []
+	var parts: Array = []
+	var shadow := [false]
+	_merge_collect(root, Transform3D.IDENTITY, skip, tools, order, parts, shadow)
+	if parts.size() < 2:
+		return null
+	var am := ArrayMesh.new()
+	for mat in order:
+		var st: SurfaceTool = tools[mat]
+		st.commit(am)
+		am.surface_set_material(am.get_surface_count() - 1, mat)
+	var mi := MeshInstance3D.new()
+	mi.name = "Merged"
+	mi.mesh = am
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON if shadow[0] else GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	root.add_child(mi)
+	for p: MeshInstance3D in parts:
+		if p.get_child_count() == 0:
+			p.get_parent().remove_child(p)
+			p.free()
+		else:
+			p.mesh = null
+	return mi
+
+
+static func _merge_collect(n: Node, xf: Transform3D, skip: Array, tools: Dictionary, order: Array, parts: Array, shadow: Array) -> void:
+	for c in n.get_children():
+		if not (c is Node3D) or skip.has(String(c.name)) or not c.visible or c.get_script() != null:
+			continue
+		var cx: Transform3D = xf * c.transform
+		var s: Vector3 = cx.basis.get_scale()
+		if absf(s.x - s.y) > 0.001 or absf(s.x - s.z) > 0.001:
+			continue          # non-uniform scale would bend the normals; keep it separate (and its children)
+		if c is MeshInstance3D and c.mesh and c.skin == null and c.material_overlay == null and c.transparency == 0.0:
+			var ok := true
+			for si in c.mesh.get_surface_count():
+				if c.mesh is ArrayMesh and (c.mesh.surface_get_primitive_type(si) != Mesh.PRIMITIVE_TRIANGLES 						or not RenderingServer.mesh_get_surface(c.mesh.get_rid(), si).get("lods", []).is_empty()):
+					ok = false
+				elif c.mesh.surface_get_arrays(si)[Mesh.ARRAY_INDEX] == null:
+					ok = false
+			if ok:
+				for si in c.mesh.get_surface_count():
+					var mat: Material = c.get_active_material(si)
+					if not tools.has(mat):
+						var st := SurfaceTool.new()
+						st.begin(Mesh.PRIMITIVE_TRIANGLES)
+						tools[mat] = st
+						order.append(mat)
+					tools[mat].append_from(c.mesh, si, cx)
+				if c.cast_shadow != GeometryInstance3D.SHADOW_CASTING_SETTING_OFF:
+					shadow[0] = true
+				parts.append(c)
+		_merge_collect(c, cx, skip, tools, order, parts, shadow)
+
+
 # ------------------------------------------------------------------ meshes
 
 static func _cyl(st: SurfaceTool, r0: float, r1: float, y0: float, y1: float, seg: int, v_scale: float, axis_x := false) -> void:
@@ -419,6 +487,7 @@ static func cooker(kind: String) -> Node3D:
 				box(Vector3(0.05, 0.55, 0.5), black, Vector3(x, 0.28, 0), n)
 			box(Vector3(0.04, 0.04, 0.5), steel, Vector3(0, 1.22, 0.2), n)
 			n.set_meta("flame_y", 0.7)
+	merge_static(n)
 	return n
 
 
@@ -575,6 +644,7 @@ static func harvester() -> Node3D:
 	for x in [-0.66, 0.66]:
 		for z in [-0.25, 0.25]:
 			box(Vector3(0.07, 0.75, 0.07), yellow, Vector3(x, 0.37, z), bed)
+	merge_static(n, ["SawHead"])         # the saw disc spins (player.saw_disc); the rest is one prop
 	return n
 
 
@@ -595,6 +665,7 @@ static func truck() -> Node3D:
 			w.rotation.z = PI / 2
 		for z in [-2.4, -0.7, 1.0]:
 			box(Vector3(0.08, 0.9, 0.08), dark, Vector3(x * 0.98, 1.25, z), n)
+	merge_static(n)
 	return n
 
 
@@ -606,6 +677,7 @@ static func counter() -> Node3D:
 	var n := Node3D.new()
 	box(Vector3(2.6, 0.95, 0.7), plank_mat(), Vector3(0, 0.475, 0), n)
 	box(Vector3(2.8, 0.08, 0.85), pbr("wood_planks_grey", 0.6, Color(0.7, 0.5, 0.33)), Vector3(0, 0.99, 0), n)
+	merge_static(n)
 	return n
 
 
@@ -617,6 +689,7 @@ static func rack() -> Node3D:
 	for x in [-0.72, 0.72]:
 		for z in [-0.27, 0.27]:
 			box(Vector3(0.06, 0.85, 0.06), m, Vector3(x, 0.42, z), n)
+	merge_static(n)
 	return n
 
 
@@ -640,6 +713,7 @@ static func cabin(w: float, d: float, wall: Color) -> Node3D:
 		g.position = Vector3(gx * (w * 0.5 - 0.05), 1.9 + d * 0.25 * tan(a), 0)
 		n.add_child(g)
 	box(Vector3(0.8, 1.3, 0.05), paint(Color(0.18, 0.11, 0.07), 0.8), Vector3(0, 0.65, d * 0.5 + 0.02), n)
+	merge_static(n)
 	return n
 
 
@@ -660,4 +734,5 @@ static func arch(text: String) -> Node3D:
 	l.outline_size = 0
 	l.position = Vector3(0, 2.6, 0.1)
 	n.add_child(l)
+	merge_static(n)
 	return n

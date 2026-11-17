@@ -134,6 +134,14 @@ Draw-call and skinning budget (on the test phone with a full camp: ~480 -> ~200 
 - Resting stack items (logs, dishes, coins) are drawn by one MultiMesh per part per stack (`stack.gd`).
 - Idle standing trees are drawn by one MultiMesh per pine variant; a tree gets its own mesh only while
   shaking, falling, regrowing or see-through (`world._batch_tree`).
+- Props built from many boxes (truck, harvester, cabins, cookers, rack, counter, gate arch) are baked into one mesh
+  per material at build time (`Art.merge_static`). Imported models with LODs are not merged (it would drop the LODs).
+- Crew and guests: the surfaces that share Pete's material are baked into one vertex-coloured surface per tint combo
+  (`CharacterRig._bake_tints`, LODs kept): a guest is 2 draws instead of 4, a lumberjack 2 instead of 6.
+- Animation LOD (`CharacterRig._process`): crew/guest poses update every frame within 5.5 m of the player, every
+  other frame elsewhere on screen and every 10th frame off screen. The player always runs at full rate.
+- Per-frame loops only touch what can change: the see-through/batching pass over trees looks at trees near the
+  player, out of the batch or just hit (`ChopTree.woken`); guest bubbles rewrite their Label3D only on change.
 - Debug builds: `adb shell run-as com.bigosoft.axetoempire.proto touch files/probe` makes the next launch cycle
   through ablations (no characters, no trees, ...) and log `PROBE <name> fps=` lines.
 

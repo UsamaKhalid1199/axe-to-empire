@@ -8,6 +8,7 @@ var stuck_t := 0.0
 var detour_t := 0.0
 var detour_dir := Vector2.ZERO
 var check_t := 1.2
+var ready_wait := 0.0   # game seconds the Big Day has been ready while the bot holds out for a 2nd crew member
 var last_dist := 999.0
 var last_pos := Vector3.ZERO
 
@@ -76,7 +77,7 @@ func _run() -> void:
 		if hud.modal_kind == "gate":
 			if g.gate_ready():
 				g.open_next_venue()
-			elif g.big_day_ready() and not w.bd_active and g.woodpile >= 15 and g.crew.lumberjack + g.crew.waiter >= 2 and w.start_big_day():
+			elif g.big_day_ready() and not w.bd_active and g.woodpile >= 15 and (g.crew.lumberjack + g.crew.waiter >= 2 or ready_wait > 120.0) and w.start_big_day():
 				print("[%5.1f min] BIG DAY started (served %d, kitchen %d, menu %d)" % [t_game / 60.0, g.vserved, g.levels.fire + 1, g.levels.menu + 1])
 			hud.close_modal()
 			p.global_position += Vector3(1.5, 0, -1.5)
@@ -117,6 +118,7 @@ func _run() -> void:
 				break
 		if w.bd_active and int(t_game * 60) % 600 == 0:
 			print("     bigday left=%.0f served=%d/%d rating=%.2f walkouts=%d q=%d rack=%d" % [w.bd_left, w.bd_served, w.bd_goal(), w.bd_rating(), w.bd_walkouts, w.queue.size(), g.rack])
+		ready_wait = ready_wait + dt if g.big_day_ready() and not w.bd_active else 0.0
 		var o: Dictionary = w.objective
 		var target: Vector3 = o.pos
 		# extra intent: visit shop / crew periodically when rich

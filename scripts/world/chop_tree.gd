@@ -18,6 +18,8 @@ var batch_key := Vector2i(-1, -1)
 var growing := false
 ## Stumps don't regrow while the player stands near them; they must move on.
 static var player: Node3D
+## Trees hit since the world's last foliage pass (it takes them out of the batch the same frame).
+static var woken: Array = []
 const REGROW_CLEAR := 7.0
 var body: Node3D          # rotates when falling
 var mesh: MeshInstance3D
@@ -78,6 +80,7 @@ func hit(dmg: int, from: Vector3) -> int:
 	var n := mini(dmg, hp)
 	hp -= n
 	_shake = 1.0
+	woken.append(self)
 	if hp <= 0:
 		_fall(from)
 	return n

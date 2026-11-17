@@ -75,6 +75,61 @@ func _ready() -> void:
 	var p := get_parent()
 	if p and p.get_script() and p.get_script().get_global_name() == &"Player":
 		_enable_outfit()
+		_lod_focus = p
+	else:
+		_lod_on()
+
+
+# ------------------------------------------------------------------ animation LOD
+## Crew and guests drive their AnimationPlayer by hand: full rate near the player, every other frame
+## (staggered) elsewhere on screen, and only a few times a second while off screen. Skeleton + skinning
+## updates only happen when the pose changes, so this saves both the animation and the skinning cost.
+## Movement (the agent's position) is untouched: only limb poses update less often.
+const LOD_NEAR := 5.5            # metres from the player: full rate
+const LOD_OFF_EVERY := 10        # frames between pose updates while off screen
+static var _lod_n := 0
+static var _lod_focus: Node3D    # the player (full-rate radius centre)
+var _lod := false
+var _lod_acc := 0.0
+var _lod_slot := 0
+
+
+func _lod_on() -> void:
+	_lod = true
+	_lod_slot = _lod_n
+	_lod_n += 1
+	anim.callback_mode_process = AnimationMixer.ANIMATION_CALLBACK_MODE_PROCESS_MANUAL
+	process_priority = 10        # after the agent's own _process (which picks the animation)
+
+
+func _process(delta: float) -> void:
+	if not _lod:
+		return
+	_lod_acc += delta
+	var every := _lod_every()
+	if every > 1 and (Engine.get_process_frames() + _lod_slot) % every != 0:
+		return
+	anim.advance(_lod_acc)
+	_lod_acc = 0.0
+
+
+func _lod_every() -> int:
+	var cam := get_viewport().get_camera_3d() if is_inside_tree() else null
+	if cam == null:
+		return 1
+	var p := global_position + Vector3(0, 0.9, 0)
+	if cam.is_position_behind(p):
+		return LOD_OFF_EVERY
+	var vs := get_viewport().get_visible_rect().size
+	var sp := cam.unproject_position(p)
+	var mx := vs.x * 0.12
+	var my := vs.y * 0.12
+	if sp.x < -mx or sp.y < -my or sp.x > vs.x + mx or sp.y > vs.y + my:
+		return LOD_OFF_EVERY
+	var pl := _lod_focus
+	if is_instance_valid(pl) and pl.global_position.distance_squared_to(p) < LOD_NEAR * LOD_NEAR:
+		return 1
+	return 2
 
 
 const MERGED := BASE + "merged/"
@@ -190,6 +245,8 @@ func outfit(kind: String, seed_i := 0) -> void:
 			_tint("Pants", [Color(0.5, 0.6, 0.9), Color(0.6, 0.5, 0.4), Color(0.3, 0.3, 0.32)][rng.randi() % 3])
 			_tint("Hair", [Color(0.35, 0.25, 0.2), Color(1.4, 1.2, 0.8), Color(0.25, 0.25, 0.25), Color(1.2, 0.7, 0.45)][rng.randi() % 4])
 			scale = Vector3.ONE * rng.randf_range(0.92, 1.06)
+	if kind != "player" and bake_tints:
+		_bake_tints()
 
 
 func _tint(part_name: String, c: Color) -> void:
@@ -205,6 +262,160 @@ func _tint(part_name: String, c: Color) -> void:
 			m.albedo_color = c
 			_tints[key] = m
 		body.set_surface_override_material(si, _tints[key])
+
+
+# ------------------------------------------------------------------ baked crew / guest outfits
+## Body, helmet, vest, shirt and pants all use the same texture and material; only the tint differs. For crew
+## and guests those surfaces are baked into ONE surface whose vertex colours carry the tints, so a guest is
+## 2 draws (that + hair) instead of 4, a lumberjack 2 instead of 6. Vertex colours are 8-bit (max 1.0), so a
+## part tinted brighter than 1.0 (white shirts, the cook's vest) keeps its own surface and tinted material.
+## Colours match the old per-surface tints (vertex colour is sRGB like albedo_color; checked pixel for pixel).
+## Geometry (incl. every LOD level) is merged once per variant + part set; each tint combo is one cached mesh.
+static var bake_tints := true
+static var _bake_geo := {}       # variant path + parts -> {arrays, lods, parts: [[name, from, count]], rest: [[arrays, lods, name, src surface]]}
+static var _bake_meshes := {}    # variant + parts + tints -> ArrayMesh
+static var _bake_mats := {}      # source material -> vertex-colour material
+
+
+func _bake_tints() -> void:
+	if body == null or not (body.mesh is ArrayMesh):
+		return
+	var src: ArrayMesh = body.mesh
+	var main_mat := src.surface_get_material(0) as StandardMaterial3D
+	if main_mat == null or not (body.get_active_material(0) is StandardMaterial3D):
+		return
+	var merge_names := []
+	for si in src.get_surface_count():
+		if src.surface_get_material(si) != main_mat:
+			continue
+		var t: Color = _tint_of.get(src.surface_get_name(si), main_mat.albedo_color)
+		if maxf(t.r, maxf(t.g, t.b)) <= 1.0:
+			merge_names.append(src.surface_get_name(si))
+	if merge_names.size() < 2:
+		return
+	var gkey := src.resource_path + ":" + ",".join(merge_names)
+	var geo: Dictionary = _bake_geo.get(gkey, {})
+	if geo.is_empty():
+		geo = _bake_merge(src, merge_names)
+		_bake_geo[gkey] = geo
+	var key := gkey
+	for part in geo.parts:
+		key += ":" + (_tint_of.get(part[0], main_mat.albedo_color) as Color).to_html()
+	var rest_mats := []
+	for r in geo.rest:
+		rest_mats.append(body.get_active_material(r[3]))
+	if not _bake_meshes.has(key):
+		var am := ArrayMesh.new()
+		var arrays: Array = geo.arrays.duplicate()
+		var colors := PackedColorArray()
+		for part in geo.parts:
+			var t: Color = _tint_of.get(part[0], main_mat.albedo_color)
+			var chunk := PackedColorArray()
+			chunk.resize(part[2])
+			chunk.fill(Color(t.r, t.g, t.b, 1.0))
+			colors.append_array(chunk)
+		arrays[Mesh.ARRAY_COLOR] = colors
+		am.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays, [], geo.lods)
+		am.surface_set_name(0, "Baked")
+		for r in geo.rest:
+			am.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, r[0], [], r[1])
+			am.surface_set_name(am.get_surface_count() - 1, r[2])
+		_bake_meshes[key] = am
+	# the vertex-colour material is the one the main surfaces wear untinted (lite on phones), albedo white
+	var base: StandardMaterial3D = _lite_cache.get(main_mat, main_mat) if OS.has_feature("mobile") else main_mat
+	if not _bake_mats.has(base):
+		var vm: StandardMaterial3D = base.duplicate()
+		vm.albedo_color = Color(1, 1, 1, base.albedo_color.a)
+		vm.vertex_color_use_as_albedo = true
+		vm.vertex_color_is_srgb = true
+		_bake_mats[base] = vm
+	body.mesh = _bake_meshes[key]
+	body.set_surface_override_material(0, _bake_mats[base])
+	for i in geo.rest.size():
+		body.set_surface_override_material(i + 1, rest_mats[i])
+
+
+## Concatenates the named surfaces (vertices, skin weights, indices and LOD indices); the rest stay as they are.
+static func _bake_merge(src: ArrayMesh, names: Array) -> Dictionary:
+	var out := []
+	out.resize(Mesh.ARRAY_MAX)
+	var idx := PackedInt32Array()
+	var parts := []
+	var rest := []
+	var lod_parts := []          # per merged part: [base indices, {edge_length: indices}], already offset
+	var n := 0
+	for si in src.get_surface_count():
+		var a := src.surface_get_arrays(si)
+		var lods := _surface_lods(src, si)
+		if not names.has(src.surface_get_name(si)):
+			rest.append([a, lods, src.surface_get_name(si), si])
+			continue
+		var cnt: int = (a[Mesh.ARRAY_VERTEX] as PackedVector3Array).size()
+		for k in [Mesh.ARRAY_VERTEX, Mesh.ARRAY_NORMAL, Mesh.ARRAY_TANGENT, Mesh.ARRAY_TEX_UV, Mesh.ARRAY_TEX_UV2,
+				Mesh.ARRAY_BONES, Mesh.ARRAY_WEIGHTS]:
+			if a[k] == null:
+				continue
+			if out[k] == null:
+				out[k] = a[k].duplicate()
+			else:
+				out[k].append_array(a[k])
+		var ia: PackedInt32Array = _offset(a[Mesh.ARRAY_INDEX], n)
+		idx.append_array(ia)
+		for e in lods:
+			lods[e] = _offset(lods[e], n)
+		parts.append([src.surface_get_name(si), n, cnt])
+		lod_parts.append([ia, lods])
+		n += cnt
+	out[Mesh.ARRAY_INDEX] = idx
+	# LOD levels: for every edge length used by any part, each part contributes its coarsest level that is
+	# not coarser than that edge length (exactly what it would have drawn on its own at that distance)
+	var edges := []
+	for lp in lod_parts:
+		for e in lp[1]:
+			if not edges.has(e):
+				edges.append(e)
+	edges.sort()
+	var merged_lods := {}
+	for e in edges:
+		var li := PackedInt32Array()
+		for lp in lod_parts:
+			var best := -1.0
+			for pe in lp[1]:
+				if pe <= e and pe > best:
+					best = pe
+			li.append_array(lp[0] if best < 0.0 else lp[1][best])
+		merged_lods[e] = li
+	return {"arrays": out, "lods": merged_lods, "parts": parts, "rest": rest}
+
+
+static func _offset(a: PackedInt32Array, by: int) -> PackedInt32Array:
+	var o := a.duplicate()
+	if by != 0:
+		for j in o.size():
+			o[j] += by
+	return o
+
+
+## A surface's LOD index lists ({edge_length: PackedInt32Array}), read back from the RenderingServer.
+static func _surface_lods(m: ArrayMesh, si: int) -> Dictionary:
+	var sd: Dictionary = RenderingServer.mesh_get_surface(m.get_rid(), si)
+	var out := {}
+	var lods: Array = sd.get("lods", [])
+	if lods.is_empty():
+		return out
+	var vcount: int = sd.get("vertex_count", 0)
+	var wide: bool = vcount > 65535 or (sd.has("index_count") and sd.index_count > 0 and (sd.index_data as PackedByteArray).size() / int(sd.index_count) == 4)
+	for l in lods:
+		var data: PackedByteArray = l.index_data
+		var ia := PackedInt32Array()
+		if wide:
+			ia = data.to_int32_array()
+		else:
+			ia.resize(data.size() / 2)
+			for j in ia.size():
+				ia[j] = data.decode_u16(j * 2)
+		out[float(l.edge_length)] = ia
+	return out
 
 
 # ------------------------------------------------------------------ player wardrobe

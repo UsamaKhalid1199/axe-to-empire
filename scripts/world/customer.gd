@@ -23,6 +23,8 @@ var hands: Stack
 var paid := 0
 var vip := false
 var mood := 0                    # 0 happy, 1 impatient, 2 angry
+var _shown_left := -1            # bubble number / colour step last written (labels only update on change)
+var _shown_red := -1.0
 static var _faces: Array = []
 
 
@@ -96,9 +98,12 @@ func _process(delta: float) -> void:
 		"queue":
 			waited += delta
 			var front: bool = slot == 0
-			bubble.visible = true
+			if not bubble.visible:
+				bubble.visible = true
 			_update_mood()
-			bubble_label.text = ("VIP %d" if vip else "%d") % (order - got)
+			if _shown_left != order - got:
+				_shown_left = order - got
+				bubble_label.text = ("VIP %d" if vip else "%d") % _shown_left
 			if path.is_empty():
 				face(global_position + Vector3(0, 0, -1), delta)
 				if mood == 2:
@@ -152,8 +157,12 @@ func _update_mood() -> void:
 			var tw := create_tween()
 			bubble.scale = Vector3.ONE * 1.25
 			tw.tween_property(bubble, "scale", Vector3.ONE, 0.25)
-	var base_col := Color("#FFD24A") if vip else Color(1, 1, 1)
-	bubble_label.modulate = base_col.lerp(Color("#FF6B5B"), clampf((u - HAPPY) / (1.0 - HAPPY), 0.0, 1.0))
+	# the number fades to red as patience runs out; in 16 steps so the label mesh isn't rebuilt every frame
+	var k := roundf(clampf((u - HAPPY) / (1.0 - HAPPY), 0.0, 1.0) * 16.0) / 16.0
+	if k != _shown_red:
+		_shown_red = k
+		var base_col := Color("#FFD24A") if vip else Color(1, 1, 1)
+		bubble_label.modulate = base_col.lerp(Color("#FF6B5B"), k)
 
 
 ## Takes patience away (a guest ahead stormed off).

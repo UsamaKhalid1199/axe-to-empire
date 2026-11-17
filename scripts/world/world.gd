@@ -126,6 +126,7 @@ func _finish_build() -> void:
 	player = Player.new()
 	player.world = self
 	ChopTree.player = player
+	ChopTree.woken.clear()
 	add_child(player)
 	player.global_position = SPAWN
 	cam = Camera3D.new()
@@ -1542,22 +1543,72 @@ func _cam_tick(delta: float) -> void:
 	# see-through foliage around the player
 	var head := player.global_position + Vector3(0, 1.0, 0)
 	if not cam.is_position_behind(head):
-		var sp := cam.unproject_position(head) / get_viewport().get_visible_rect().size
-		var vs := get_viewport().get_visible_rect().size
-		var cut := Art.foliage_mat(Color(0.04, 0.11, 0.06), Color(0.36, 0.55, 0.24), true)
-		var ppos := player.global_position
-		var chopping: Array = player._targets
-		for t in trees:
-			var d: Vector3 = t.global_position - ppos
-			var covers: bool = t.alive and d.z > 0.9 and d.z < 4.8 and absf(d.x) < 1.9 and not chopping.has(t)
+		_foliage_tick(head)
+
+
+## See-through trees + forest batching, run every frame. Kept cheap: tree positions are cached (trees never
+## move); each frame only looks at the trees that can change: those near the player (list refreshed every few
+## frames), trees not in the batch (shaking, fallen, regrowing), trees just hit (ChopTree.woken) and the golden
+## one. The cut shader's uniforms are only pushed while some tree actually uses it.
+const FOLIAGE_NEAR := 8.5         # > reach of the see-through box (5.2 m) + how far the player moves between refreshes
+const FOLIAGE_REFRESH := 6        # frames between full scans
+var _tree_pos := PackedVector3Array()
+var _cut_mat: ShaderMaterial
+var _cut_trees: Array = []        # trees currently wearing the see-through material
+var _hot_trees: Array = []        # near the player or out of the batch (refreshed by the full scan)
+var _foliage_n := 0
+
+
+func _foliage_tick(head: Vector3) -> void:
+	if _cut_mat == null:
+		_cut_mat = Art.foliage_mat(Color(0.04, 0.11, 0.06), Color(0.36, 0.55, 0.24), true)
+	var ppos := player.global_position
+	_foliage_n -= 1
+	if _foliage_n <= 0 or _tree_pos.size() != trees.size():
+		_foliage_n = FOLIAGE_REFRESH
+		if _tree_pos.size() != trees.size():
+			_tree_pos.resize(trees.size())
+			for i in trees.size():
+				_tree_pos[i] = trees[i].global_position
+		_hot_trees.clear()
+		var r2 := FOLIAGE_NEAR * FOLIAGE_NEAR
+		for i in trees.size():
+			var t: ChopTree = trees[i]
+			if not t.batched or _tree_pos[i].distance_squared_to(ppos) < r2:
+				_hot_trees.append(t)
+	var cands: Array = _hot_trees
+	if not ChopTree.woken.is_empty() or not _cut_trees.is_empty() or golden:
+		cands = _hot_trees + ChopTree.woken + _cut_trees
+		if golden:
+			cands.append(golden)
+		for t in ChopTree.woken:
+			if is_instance_valid(t) and not _hot_trees.has(t):
+				_hot_trees.append(t)   # keep watching it until it is back in the batch
+		ChopTree.woken.clear()
+	var cut := _cut_mat
+	var chopping: Array = player._targets
+	var was_cut := _cut_trees
+	_cut_trees = []
+	for o in cands:
+		if not is_instance_valid(o):
+			continue
+		var t: ChopTree = o
+		var d: Vector3 = t.global_position - ppos
+		var covers: bool = d.z > 0.9 and d.z < 4.8 and absf(d.x) < 1.9 and t.alive and not chopping.has(t)
+		if covers and not _cut_trees.has(t):
+			_cut_trees.append(t)
+		if covers or t == golden or was_cut.has(t):
 			var want: Material = cut if covers else (_gold_mat if t == golden and _gold_mat else null)
 			if t.mesh.material_override != want:
 				t.mesh.material_override = want
-			_batch_tree(t, t.alive and not covers and t._shake <= 0.0 and not t.growing and t != golden)
-		for m in [cut]:
-			m.set_shader_parameter("player_screen", sp)
-			m.set_shader_parameter("player_dist", cam.global_position.distance_to(head))
-			m.set_shader_parameter("aspect", vs.x / vs.y)
+		var batch: bool = t.alive and not covers and t._shake <= 0.0 and not t.growing and t != golden
+		if batch != t.batched:
+			_batch_tree(t, batch)
+	if not _cut_trees.is_empty():
+		var vs := get_viewport().get_visible_rect().size
+		cut.set_shader_parameter("player_screen", cam.unproject_position(head) / vs)
+		cut.set_shader_parameter("player_dist", cam.global_position.distance_to(head))
+		cut.set_shader_parameter("aspect", vs.x / vs.y)
 
 
 # ------------------------------------------------------------------ objective arrow
