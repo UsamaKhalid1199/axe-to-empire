@@ -320,7 +320,7 @@ func tick(delta: float) -> void:
 
 
 func _tick_drive(delta: float) -> void:
-	_car_t -= delta
+	_car_t -= delta * world.car_rate()
 	if _car_t <= 0.0:
 		_car_t = world.spawn_interval() * 1.9 * randf_range(0.8, 1.2)
 		if cars.size() < 3:
@@ -344,7 +344,7 @@ func _tick_drive(delta: float) -> void:
 					c.got += 1
 					Sfx.play("pop", -10.0, 1.1)
 					if c.got >= c.order:
-						var amount: int = int(round(c.order * Game.dish_price() * 1.5 * world.price_mult()))
+						var amount: int = int(round(c.order * Game.dish_price() * 1.5 * world.price_mult() * boost()))
 						var score: float = 5.0 if c.waited < 18.0 else (4.0 if c.waited < 32.0 else 3.0)
 						world.card_paid(n.global_position, amount, score, c.order)
 						c.state = "leave"
@@ -418,7 +418,7 @@ func _tick_raft(delta: float) -> void:
 
 func _raft_depart() -> void:
 	var n := raft_stack.count()
-	Game.sp["paid"] = n * int(Game.cfg.log_sell_price) * 3
+	Game.sp["paid"] = int(round(n * int(Game.cfg.log_sell_price) * 3 * boost()))
 	Game.sp["away"] = RAFT_AWAY
 	Game.sp["raft"] = 0
 	var tw := raft.create_tween()
@@ -444,7 +444,7 @@ func _raft_return() -> void:
 		Game.add_coins(paid)
 		Game.stats.sold += paid / maxi(1, int(Game.cfg.log_sell_price) * 3)
 		world.float_text.emit("SAWMILL +%s" % UI.fmt(paid), RAFT_DOCK + Vector3(0, 2.4, 0), UI.GOLD_LIGHT)
-		Game.toast.emit("Raft is back: +%s coins" % UI.fmt(paid))
+		Game.toast.emit("Raft is back: +%s" % UI.cash(paid))
 		Sfx.play("cash", -4.0)
 
 
@@ -532,7 +532,7 @@ func _tick_van(delta: float) -> void:
 
 func _van_depart() -> void:
 	var n := van_stack.count()
-	Game.sp["paid"] = int(round(n * Game.dish_price() * 2.0))
+	Game.sp["paid"] = int(round(n * Game.dish_price() * 2.0 * boost()))
 	Game.sp["dishes"] = n
 	Game.sp["away"] = VAN_AWAY
 	Game.sp["van"] = 0
@@ -663,6 +663,16 @@ func log_put(s: Stack) -> bool:
 
 # ------------------------------------------------------------------ effects on guests
 
+## Station level: every level makes the station pay 4% more.
+func boost() -> float:
+	return 1.0 + 0.04 * Game.levels.station
+
+
+## The crew only works the station from level 5 (index 4) on; before that it's the player's job.
+func crew_allowed() -> bool:
+	return built and Game.levels.station >= 4
+
+
 func price_mult() -> float:
 	if not built:
 		return 1.0
@@ -689,7 +699,7 @@ func extra_queue() -> int:
 
 ## Hotel guests: about one in six is a VIP (bigger order, pays 3x, less patient).
 func roll_vip() -> bool:
-	return type == "van" and built and randf() < 0.17
+	return type == "van" and built and randf() < 0.17 * (1.0 + 0.02 * Game.levels.station)
 
 
 # ------------------------------------------------------------------ objective hints

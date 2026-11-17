@@ -1,6 +1,12 @@
 class_name Customer
 extends Agent
-## Hiker: walks in, queues at the counter, takes dishes, pays, maybe sits and tips, leaves.
+## Guest: walks in, queues at the counter, takes dishes, pays, maybe sits and tips, leaves.
+## Mood follows the share of patience used: happy (<50%) pays +20% and rates 5★, impatient rates 4★,
+## angry rates 2★, and past 100% they walk out (1★) and the two guests behind them get grumpier.
+## A guest who finds the line full just walks past ("Too busy!") and the sale is lost.
+
+const HAPPY := 0.5
+const ANGRY := 0.8
 
 var state := "arrive"
 var slot := -1
@@ -12,9 +18,12 @@ var seat := -1
 var timer := 0.0
 var bubble: Node3D
 var bubble_label: Label3D
+var face_spr: Sprite3D
 var hands: Stack
 var paid := 0
 var vip := false
+var mood := 0                    # 0 happy, 1 impatient, 2 angry
+static var _faces: Array = []
 
 
 func setup(w: Node, seed_i: int) -> Customer:
@@ -22,13 +31,23 @@ func setup(w: Node, seed_i: int) -> Customer:
 	var c: Dictionary = Game.cfg.customers
 	speed = float(c.speed) * randf_range(0.9, 1.1)
 	walker = true
-	patience = float(c.patience)
-	order = randi_range(int(c.order_min), int(c.order_max))
-	patience *= w.patience_mult()
-	vip = w.specials != null and w.specials.roll_vip()
+	patience = float(c.patience) * randf_range(0.9, 1.1)
+	order = randi_range(int(c.order_min), int(c.order_max)) + int(c.get("order_bonus", 0)) + w.order_bonus()
+	patience *= w.patience_mult() * Game.dining_patience()
+	vip = w.roll_vip()
 	if vip:
 		order += 2
 		patience *= 0.6
+	set_meta("seed", seed_i)
+	return self
+
+
+## A passer-by who sees the line is full: walks along the road and keeps going.
+func setup_passer(w: Node, seed_i: int) -> Customer:
+	world = w
+	speed = float(Game.cfg.customers.speed) * randf_range(1.0, 1.15)
+	walker = true
+	state = "pass"
 	set_meta("seed", seed_i)
 	return self
 
@@ -41,14 +60,18 @@ func _ready() -> void:
 	bubble = Node3D.new()
 	bubble.position.y = 2.15
 	add_child(bubble)
-	var spr := Sprite3D.new()
-	spr.texture = load("res://assets/icons/dish.svg")
-	spr.pixel_size = 0.0042
-	spr.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	spr.no_depth_test = true
-	spr.render_priority = 4
-	spr.position.x = -0.18
-	bubble.add_child(spr)
+	if _faces.is_empty():
+		for n in ["face_happy", "face_meh", "face_angry"]:
+			var path := "res://assets/icons/%s.svg" % n
+			_faces.append(load(path) if ResourceLoader.exists(path) else load("res://assets/icons/smile.svg"))
+	face_spr = Sprite3D.new()
+	face_spr.texture = _faces[0]
+	face_spr.pixel_size = 0.0036
+	face_spr.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	face_spr.no_depth_test = true
+	face_spr.render_priority = 4
+	face_spr.position.x = -0.2
+	bubble.add_child(face_spr)
 	bubble_label = Label3D.new()
 	bubble_label.font = UI.font_bold()
 	bubble_label.font_size = 72
@@ -58,7 +81,7 @@ func _ready() -> void:
 	bubble_label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	bubble_label.no_depth_test = true
 	bubble_label.render_priority = 5
-	bubble_label.position.x = 0.2
+	bubble_label.position.x = 0.22
 	bubble.add_child(bubble_label)
 	bubble.visible = false
 
@@ -74,12 +97,12 @@ func _process(delta: float) -> void:
 			waited += delta
 			var front: bool = slot == 0
 			bubble.visible = true
+			_update_mood()
 			bubble_label.text = ("VIP %d" if vip else "%d") % (order - got)
-			var urgency := waited / patience
-			var base_col := Color("#FFD24A") if vip else Color(1, 1, 1)
-			bubble_label.modulate = base_col.lerp(Color("#FF6B5B"), clampf((urgency - 0.5) * 2.0, 0.0, 1.0))
 			if path.is_empty():
 				face(global_position + Vector3(0, 0, -1), delta)
+				if mood == 2:
+					rig.play("idle", 1.6, 0.2)    # fidgety
 			else:
 				walk(delta)
 			if front and path.is_empty():
@@ -111,16 +134,47 @@ func _process(delta: float) -> void:
 				world.seat_done(seat, paid)
 				seat = -1
 				_go_home()
+		"pass":
+			if walk(delta):
+				queue_free()
 		"leave":
 			if walk(delta):
 				queue_free()
 
 
+func _update_mood() -> void:
+	var u := waited / maxf(1.0, patience)
+	var m := 0 if u < HAPPY else (1 if u < ANGRY else 2)
+	if m != mood or face_spr.texture != _faces[m]:
+		mood = m
+		face_spr.texture = _faces[m]
+		if m == 2:
+			var tw := create_tween()
+			bubble.scale = Vector3.ONE * 1.25
+			tw.tween_property(bubble, "scale", Vector3.ONE, 0.25)
+	var base_col := Color("#FFD24A") if vip else Color(1, 1, 1)
+	bubble_label.modulate = base_col.lerp(Color("#FF6B5B"), clampf((u - HAPPY) / (1.0 - HAPPY), 0.0, 1.0))
+
+
+## Takes patience away (a guest ahead stormed off).
+func annoy(frac: float) -> void:
+	waited += patience * frac
+
+
 func _pay() -> void:
 	bubble.visible = false
-	paid = int(round(order * Game.dish_price() * world.price_mult() * (3.0 if vip else 1.0)))
-	var score := 5.0 if waited < 15.0 else (4.0 if waited < 28.0 else 3.0)
-	world.customer_paid(self, paid, score)
+	_update_mood()
+	var mult: float = world.price_mult() * (3.0 if vip else 1.0)
+	var bonus := ""
+	if mood == 0:
+		mult *= 1.0 + float(Game.cfg.customers.happy_bonus)
+		bonus = "HAPPY"
+	if world.player_serving():
+		mult *= 1.0 + float(Game.cfg.customers.hands_on_bonus)
+		bonus = "SERVICE" if bonus == "" else bonus + " + SERVICE"
+	paid = int(round(order * Game.dish_price() * mult))
+	var score: float = [5.0, 4.0, 2.0][mood]
+	world.customer_paid(self, paid, score, bonus)
 	world.queue_leave(self)
 	seat = world.take_seat(self)
 	if seat >= 0:

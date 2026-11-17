@@ -33,6 +33,7 @@ func _run() -> void:
 	g.crew = {"lumberjack": 0, "waiter": 0, "cook": 0}
 	g.sp = {}
 	g.woodpile = 10
+	g.levels.station = 4   # crew may use the station from Lv 5
 	g.coins = 100000
 	change_scene_to_file("res://scenes/main.tscn")
 	await _ready_scene()
@@ -64,7 +65,7 @@ func _run() -> void:
 			await create_timer(3.0).timeout
 			ok(p.hands.count() == 1, "player handed 3 dishes through the window (left %d)" % p.hands.count())
 			ok(g.vserved == s0 + 3, "3 guests counted as served")
-			var want := int(round(3 * g.dish_price() * 1.5))
+			var want := int(round(3 * g.dish_price() * 1.5 * w.price_mult() * sp.boost()))
 			ok(g.coins - c0 == want, "car paid 1.5x by card (%d, want %d)" % [g.coins - c0, want])
 		"raft":
 			p.back.set_count(16)
@@ -73,7 +74,7 @@ func _run() -> void:
 			ok(p.back.count() == 0, "logs went from the back onto the raft")
 			g.sp["away"] = 0.3
 			await create_timer(1.0).timeout
-			var want := 16 * int(g.cfg.log_sell_price) * 3
+			var want := int(round(16 * int(g.cfg.log_sell_price) * 3 * sp.boost()))
 			ok(g.coins - c0 == want, "raft paid 3x the truck price (%d, want %d)" % [g.coins - c0, want])
 			# crew: lumberjacks send surplus to the raft when the woodpile is full
 			g.woodpile = int(g.cfg.woodpile_cap)
@@ -127,7 +128,7 @@ func _run() -> void:
 			await create_timer(9.0).timeout
 			ok(float(g.sp.get("away", 0.0)) > 0.0, "van left with a partial load after waiting")
 			var paid: int = int(g.sp.get("paid", 0))
-			ok(paid == int(round(4 * g.dish_price() * 2.0)), "delivery is worth 2x (%d)" % paid)
+			ok(paid == int(round(4 * g.dish_price() * 2.0 * sp.boost())), "delivery is worth 2x (%d)" % paid)
 			g.sp["away"] = 0.3
 			var c1: int = g.coins
 			await create_timer(1.0).timeout
@@ -150,7 +151,7 @@ func _run() -> void:
 			Engine.time_scale = 1.0
 			ok(used, "waiters loaded the van")
 	# crew income bonus for background venues
-	var base: float = g._rate(2, 2, 1, {"campfire": true, "tables_1": true, "tables_2": true, "fire_2": true}, 1, 1, g.cfg)
+	var base: float = g._rate(2, 2, 1, {"campfire": true, "tables_1": true, "tables_2": true, "fire_2": true}, {"fire": 1, "menu": 1}, g.cfg)
 	var with_sp: float = g.passive_rate() if false else base * g._special_mult(k, {"special": true})
 	ok(with_sp > base, "built station boosts crew income (x%.2f)" % (with_sp / maxf(base, 0.001)))
 	print("SPECIAL %s fails=%d" % [t, fails])

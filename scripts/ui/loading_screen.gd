@@ -15,6 +15,13 @@ const TIPS := [
 	"The chainsaw cuts while you run.",
 	"Stop on a pad to pay for it. Walking across costs nothing.",
 	"Hotter fires and a better menu bring more hungry hikers.",
+	"Happy guests pay 20% more. Don't keep them waiting!",
+	"Stand at the counter: guests you serve yourself pay 25% more.",
+	"Golden trees are worth a fortune. Chop them before they fade.",
+	"Big upgrades take time to build. They finish even while you're away.",
+	"Win the Big Day to open the road to the next place.",
+	"Three stars per place: every star adds income everywhere.",
+	"A full line turns guests away. More fires and upgrades fix that.",
 ]
 
 var card: Control

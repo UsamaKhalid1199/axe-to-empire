@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128"><defs>
+<radialGradient id="gold" cx="38%" cy="32%" r="75%"><stop offset="0" stop-color="#FFF1B0"/><stop offset=".45" stop-color="#FFC943"/><stop offset="1" stop-color="#C77A0E"/></radialGradient>
+<linearGradient id="goldl" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FFE08A"/><stop offset="1" stop-color="#E08E14"/></linearGradient>
+<linearGradient id="wood" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#9A6438"/><stop offset="1" stop-color="#5A3518"/></linearGradient>
+<linearGradient id="steel" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#F4F6F8"/><stop offset=".5" stop-color="#AEB5BC"/><stop offset="1" stop-color="#6D757D"/></linearGradient>
+<linearGradient id="green" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#8EDB6E"/><stop offset="1" stop-color="#2E8F45"/></linearGradient>
+<radialGradient id="blue" cx="38%" cy="32%" r="75%"><stop offset="0" stop-color="#8CC8FF"/><stop offset="1" stop-color="#2C6FC0"/></radialGradient>
+</defs><circle cx="64" cy="69" r="50" fill="#1C4E85"/><circle cx="64" cy="63" r="50" fill="url(#blue)"/><ellipse cx="46" cy="38" rx="20" ry="11" fill="#FFFFFF" opacity=".22" transform="rotate(-25 46 38)"/><circle cx="64" cy="36" r="9" fill="#FFFFFF"/><path d="M52 54 H70 V88 H76 V96 H52 V88 H58 V62 H52 Z" fill="#FFFFFF" stroke="#FFFFFF" stroke-width="2" stroke-linejoin="round"/></svg>

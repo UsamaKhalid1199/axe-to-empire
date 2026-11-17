@@ -65,8 +65,8 @@ func slot(i: int) -> Transform3D:
 			var per2 := 9
 			var layer2 := i / per2
 			var k3 := i % per2
-			t.origin = Vector3((k3 % 3 - 1) * 0.22, 0.015 + layer2 * 0.032, (k3 / 3 - 1) * 0.22)
-			t.basis = Basis(Vector3.UP, i * 0.7)
+			t.origin = Vector3((k3 % 3 - 1) * 0.27, 0.018 + layer2 * 0.037, (k3 / 3 - 1) * 0.16)
+			t.basis = Basis(Vector3.UP, 0.12 * sin(i * 1.9))
 		Layout.BUNK:
 			var per3 := 7
 			var layer3 := i / per3

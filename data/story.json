@@ -1,0 +1,182 @@
+{
+  "characters": {
+    "mags":   {"name": "Old Mags",       "role": "Your grandmother"},
+    "doyle":  {"name": "Ranger Doyle",   "role": "Trail ranger"},
+    "rosa":   {"name": "Rosa",           "role": "Trucker"},
+    "finn":   {"name": "Finn",           "role": "Raftsman, free mill"},
+    "ingrid": {"name": "Ingrid",         "role": "Ski instructor"},
+    "judge":  {"name": "Judge Hollis",   "role": "Fair committee"},
+    "bell":   {"name": "Mr. Bell",       "role": "Hotel concierge"},
+    "victor": {"name": "Victor Grayline","role": "Grayline Lumber Co."}
+  },
+  "common": [
+    {"on": "walkout",     "who": "mags",  "text": "Somebody just walked out hungry. Don't let them wait! A hungry guest tells ten friends."},
+    {"on": "rating_low",  "who": "mags",  "text": "Your rating is slipping. Keep the counter stocked, or hire a waiter to help."},
+    {"on": "golden",      "who": "mags",  "text": "See that glowing tree? Old timber like that is worth a fortune. Chop it before it fades!"},
+    {"on": "renovation",  "who": "mags",  "text": "Big upgrades take time. The place keeps running while the builders work. Come back when it's done."},
+    {"on": "group",       "who": "mags",  "text": "Here comes a crowd! Keep the food flowing and nobody leaves."},
+    {"on": "balk",        "who": "mags",  "text": "The line is full, so new guests are walking past. More fires, more upgrades, more help!"}
+  ],
+  "chapters": {
+    "camp": {
+      "beats": [
+        {"on": "start", "who": "mags",   "text": "Forty years I've fed hikers on this trail. My back's done, so the camp is yours now. Here's my axe."},
+        {"on": "start", "who": "mags",   "text": "Chop wood, keep the fire going, serve the hungry ones. Grayline Lumber wants this forest. Don't give it to them."},
+        {"on": "built:tables_1", "who": "doyle", "text": "Ranger Doyle. Grayline says nobody uses this trail. If your camp brings in the crowds, I can protect it."},
+        {"on": "built:shop", "who": "victor", "text": "Victor Grayline. Cute little camp. My survey crew is marking these trees. Sell me the lot before winter."},
+        {"on": "hired", "who": "mags", "text": "That lad used to cut for Grayline until they laid him off. Treat your crew well and they'll do the same for you."},
+        {"on": "bigday_ready", "who": "doyle", "text": "The Trail Festival is coming! Feed the crowd well and I'll have the proof I need to protect this forest."},
+        {"on": "bigday_win", "who": "doyle", "text": "The trail is protected! Here's a road permit. There's an empty shack out on the highway..."},
+        {"on": "bigday_win", "who": "mags", "text": "I knew you had it in you. Go on, the highway is waiting. Your crew will keep the camp going."},
+        {"on": "bigday_fail", "who": "doyle", "text": "Too many hikers left hungry. Get the kitchen ready, then try again."}
+      ],
+      "tasks": [
+        {"t": "build", "id": "campfire", "r": 2},
+        {"t": "serve", "n": 5, "r": 3},
+        {"t": "build", "id": "tables_1", "r": 4},
+        {"t": "build", "id": "shop", "r": 4},
+        {"t": "level", "id": "kitchen", "n": 2, "r": 5},
+        {"t": "build", "id": "crew_hut", "r": 6},
+        {"t": "hire", "id": "lumberjack", "r": 8},
+        {"t": "golden", "r": 8},
+        {"t": "build", "id": "fire_2", "r": 10},
+        {"t": "level", "id": "menu", "n": 3, "r": 10},
+        {"t": "build", "id": "tables_2", "r": 12},
+        {"t": "level", "id": "kitchen", "n": 5, "r": 15},
+        {"t": "bigday", "r": 30}
+      ]
+    },
+    "shack": {
+      "beats": [
+        {"on": "start", "who": "mags", "text": "A shack on the highway! Grayline trucks run this road all day, and their drivers eat out of vending machines."},
+        {"on": "start", "who": "rosa", "text": "Name's Rosa. I've driven this road twenty years. Make a burger worth stopping for and every trucker will follow me."},
+        {"on": "built:special", "who": "rosa", "text": "A drive-thru window! Now we don't even have to park. Cars pay by card, and pay well."},
+        {"on": "built:tables_1", "who": "victor", "text": "My billboard says 'Next food: 80 miles. Grayline Stop.' Your little shack is ruining my numbers."},
+        {"on": "hired", "who": "rosa", "text": "Good, more hands. The convoy is coming soon, and you'll need every one of them."},
+        {"on": "bigday_ready", "who": "rosa", "text": "I've called the whole convoy. Twelve rigs, all hungry. Ready when you are!"},
+        {"on": "bigday_win", "who": "rosa", "text": "Every driver on this road knows your name now. Grayline's mill on the lake pays nothing. Finn's free mill across the water pays real money."},
+        {"on": "bigday_fail", "who": "rosa", "text": "Half the convoy drove off hungry. Stock up and call me again."}
+      ],
+      "tasks": [
+        {"t": "serve", "n": 10, "r": 3},
+        {"t": "build", "id": "tables_1", "r": 4},
+        {"t": "build", "id": "shop", "r": 4},
+        {"t": "level", "id": "kitchen", "n": 3, "r": 6},
+        {"t": "build", "id": "special", "r": 8},
+        {"t": "build", "id": "crew_hut", "r": 6},
+        {"t": "hire", "id": "waiter", "r": 8},
+        {"t": "golden", "r": 8},
+        {"t": "build", "id": "fire_2", "r": 10},
+        {"t": "level", "id": "station", "n": 5, "r": 12},
+        {"t": "build", "id": "tables_2", "r": 12},
+        {"t": "level", "id": "menu", "n": 5, "r": 15},
+        {"t": "bigday", "r": 30}
+      ]
+    },
+    "lake": {
+      "beats": [
+        {"on": "start", "who": "finn", "text": "I'm Finn. Grayline owns the near mill and pays pennies for logs. Raft them over to my mill and I'll pay three times as much."},
+        {"on": "start", "who": "mags", "text": "Anglers are patient folk, but they eat a lot. Keep the fryers busy."},
+        {"on": "built:special", "who": "finn", "text": "Fine raft! Load her up and she'll sail to my mill. That timber keeps my saws turning for another week."},
+        {"on": "built:fire_2", "who": "victor", "text": "Fine. Grayline now pays double for logs. ...Still less than Finn? Ridiculous."},
+        {"on": "bigday_ready", "who": "finn", "text": "The fishing tournament is here. Every angler on the lake wants a feast!"},
+        {"on": "bigday_win", "who": "finn", "text": "My mill is safe, thanks to you. There's a lodge up the mountain, freezing since Grayline cut the windbreak."},
+        {"on": "bigday_fail", "who": "finn", "text": "The anglers went home grumbling. Get more fish in the fryer and try again."}
+      ],
+      "tasks": [
+        {"t": "serve", "n": 10, "r": 3},
+        {"t": "build", "id": "tables_1", "r": 4},
+        {"t": "build", "id": "shop", "r": 4},
+        {"t": "build", "id": "special", "r": 8},
+        {"t": "level", "id": "kitchen", "n": 4, "r": 6},
+        {"t": "build", "id": "crew_hut", "r": 6},
+        {"t": "hire", "id": "waiter", "r": 8},
+        {"t": "build", "id": "fire_2", "r": 10},
+        {"t": "golden", "r": 8},
+        {"t": "level", "id": "station", "n": 5, "r": 12},
+        {"t": "build", "id": "tables_2", "r": 12},
+        {"t": "level", "id": "dining", "n": 5, "r": 15},
+        {"t": "bigday", "r": 30}
+      ]
+    },
+    "lodge": {
+      "beats": [
+        {"on": "start", "who": "ingrid", "text": "Ingrid, ski school. Grayline cut the windbreak forest and now the lodge is an icebox. Warm it up and I'll bring every class I teach."},
+        {"on": "start", "who": "mags", "text": "Cold guests don't wait. A fire in the hearth changes everything."},
+        {"on": "built:special", "who": "ingrid", "text": "A real fire! Keep it fed and the skiers will stay, and pay more for the comfort."},
+        {"on": "built:tables_1", "who": "victor", "text": "You're planting trees where I cut them? That's... bad for business. Mine, I mean."},
+        {"on": "bigday_ready", "who": "ingrid", "text": "A blizzard is rolling in and every skier is coming down at once. Keep that fire burning!"},
+        {"on": "bigday_win", "who": "ingrid", "text": "Warmest lodge on the mountain! The harvest fair committee wants you, and Grayline has bought a stand there too."},
+        {"on": "bigday_fail", "who": "ingrid", "text": "They froze and left. Stack the fireplace full before the next storm."}
+      ],
+      "tasks": [
+        {"t": "serve", "n": 12, "r": 3},
+        {"t": "build", "id": "tables_1", "r": 4},
+        {"t": "build", "id": "shop", "r": 4},
+        {"t": "build", "id": "special", "r": 8},
+        {"t": "level", "id": "kitchen", "n": 4, "r": 6},
+        {"t": "build", "id": "crew_hut", "r": 6},
+        {"t": "hire", "id": "lumberjack", "r": 8},
+        {"t": "golden", "r": 8},
+        {"t": "build", "id": "fire_2", "r": 10},
+        {"t": "level", "id": "station", "n": 5, "r": 12},
+        {"t": "build", "id": "tables_2", "r": 12},
+        {"t": "level", "id": "dining", "n": 5, "r": 15},
+        {"t": "bigday", "r": 30}
+      ]
+    },
+    "smoke": {
+      "beats": [
+        {"on": "start", "who": "judge", "text": "Judge Hollis, fair committee. The best stand at the fair wins the valley's blessing. Grayline has a stand right across from yours."},
+        {"on": "start", "who": "victor", "text": "May the best stand win. It'll be mine. Long lines? My stand takes your guests."},
+        {"on": "built:special", "who": "judge", "text": "The fair bell! Ring it and the whole fair comes running. Double prices while the rush lasts."},
+        {"on": "built:fire_2", "who": "mags", "text": "Don't race him on price. Beat him on service."},
+        {"on": "bigday_ready", "who": "judge", "text": "Judging day. Every guest you lose walks across to Grayline's stand. Show us what you've got!"},
+        {"on": "bigday_win", "who": "judge", "text": "Best stand at the fair, by a mile! Grayline is losing money everywhere. His Grand Timber Hotel is up for sale."},
+        {"on": "bigday_fail", "who": "victor", "text": "Ha! They came to my stand instead. Better luck next year."}
+      ],
+      "tasks": [
+        {"t": "serve", "n": 15, "r": 3},
+        {"t": "build", "id": "tables_1", "r": 4},
+        {"t": "build", "id": "shop", "r": 4},
+        {"t": "build", "id": "special", "r": 8},
+        {"t": "level", "id": "kitchen", "n": 5, "r": 6},
+        {"t": "build", "id": "crew_hut", "r": 6},
+        {"t": "hire", "id": "waiter", "r": 8},
+        {"t": "golden", "r": 8},
+        {"t": "build", "id": "fire_2", "r": 10},
+        {"t": "level", "id": "sign", "n": 5, "r": 12},
+        {"t": "build", "id": "tables_2", "r": 12},
+        {"t": "level", "id": "menu", "n": 6, "r": 15},
+        {"t": "bigday", "r": 30}
+      ]
+    },
+    "hotel": {
+      "beats": [
+        {"on": "start", "who": "bell", "text": "Mr. Bell, concierge. I stayed through every bad year Grayline gave this hotel. Welcome home. Your grandmother worked here as a girl."},
+        {"on": "start", "who": "mags", "text": "The Grand Timber! Bring her back to life. And watch the VIPs: they pay three times as much, but they don't like waiting."},
+        {"on": "built:special", "who": "bell", "text": "Room service is back! Load the van and the whole valley eats hotel steak."},
+        {"on": "built:tables_1", "who": "victor", "text": "Last offer. Give me back the old camp and I'll leave this hotel alone. ...No? Then you'll see."},
+        {"on": "bigday_ready", "who": "bell", "text": "The critic has arrived, with her VIP party. Her review decides everything."},
+        {"on": "bigday_win", "who": "bell", "text": "Five stars! Grayline has sold his last holdings and left the valley. The empire is yours."},
+        {"on": "bigday_win", "who": "mags", "text": "Look at all this. You did it the right way. There are other valleys where Grayline still operates..."},
+        {"on": "bigday_fail", "who": "bell", "text": "The critic left early. We'll invite her again once we're ready."}
+      ],
+      "tasks": [
+        {"t": "serve", "n": 15, "r": 3},
+        {"t": "build", "id": "tables_1", "r": 4},
+        {"t": "build", "id": "shop", "r": 4},
+        {"t": "build", "id": "special", "r": 8},
+        {"t": "level", "id": "kitchen", "n": 5, "r": 6},
+        {"t": "build", "id": "crew_hut", "r": 6},
+        {"t": "hire", "id": "waiter", "r": 8},
+        {"t": "golden", "r": 8},
+        {"t": "build", "id": "fire_2", "r": 10},
+        {"t": "level", "id": "station", "n": 5, "r": 12},
+        {"t": "build", "id": "tables_2", "r": 12},
+        {"t": "level", "id": "menu", "n": 6, "r": 15},
+        {"t": "bigday", "r": 30}
+      ]
+    }
+  }
+}

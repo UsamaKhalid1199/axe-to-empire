@@ -8,6 +8,7 @@ const TEXT := Color(1, 1, 1, 0.96)
 const MUTED := Color(1, 1, 1, 0.62)
 const GREEN := Color("#8EE07A")
 const RED := Color("#FF7A6A")
+const CASH := Color("#7BE38A")          # green money
 
 static var _fonts: Dictionary = {}
 
@@ -117,6 +118,11 @@ static func fmt(n: float) -> String:
 	if v >= 1000:
 		return "%d,%03d" % [int(n) / 1000, int(n) % 1000]
 	return str(int(n))
+
+
+## Money as shown to players: $1,250 · $12.5K · $3.40M
+static func cash(n: float) -> String:
+	return ("-$" if n < 0 else "$") + fmt(absf(n))
 
 
 static func progress_bar(w: float, h: float) -> ProgressBar:

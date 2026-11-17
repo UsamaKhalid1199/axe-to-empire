@@ -1,671 +1,765 @@
 {
-  "growth": [
-    1,
-    4,
-    14,
-    45,
-    140,
-    420
-  ],
-  "chapters": [
-    {
-      "id": "camp",
-      "name": "Forest Camp",
-      "tagline": "Grilled corn for hungry hikers",
-      "product": "corn",
-      "cooker": "firepit",
-      "guests": "hikers",
-      "builds": {
-        "campfire": "Campfire",
-        "fire_2": "Second fire",
-        "tables_1": "Picnic tables",
-        "tables_2": "More tables",
-        "shop": "Tool shed",
-        "crew_hut": "Crew cabin"
-      },
-      "heat": "Hotter fire",
-      "menu": [
-        "Grilled corn",
-        "Corn + sausage",
-        "Camp skewer",
-        "Hunter's plate"
-      ],
-      "theme": {
-        "grass": [
-          0.8,
-          1.0,
-          0.55
-        ],
-        "dirt": [
-          1.05,
-          0.97,
-          0.9
-        ],
-        "pine_dark": [
-          0.04,
-          0.11,
-          0.06
-        ],
-        "pine_light": [
-          0.36,
-          0.55,
-          0.24
-        ],
-        "leaf_dark": [
-          0.07,
-          0.15,
-          0.05
-        ],
-        "leaf_light": [
-          0.42,
-          0.55,
-          0.2
-        ],
-        "sun": [
-          1.0,
-          0.96,
-          0.88
-        ],
-        "sun_energy": 1.45,
-        "sun_pitch": -52,
-        "sky_top": [
-          0.32,
-          0.52,
-          0.78
-        ],
-        "sky_horizon": [
-          0.72,
-          0.8,
-          0.86
-        ],
-        "ambient": 0.55,
-        "wall": [
-          1.35,
-          1.1,
-          0.85
-        ]
-      },
-      "dining": "picnic"
-    },
-    {
-      "id": "shack",
-      "name": "Roadside Shack",
-      "tagline": "Smash burgers for long-haul truckers",
-      "product": "burger",
-      "cooker": "grill",
-      "guests": "truckers",
-      "builds": {
-        "campfire": "Burger grill",
-        "fire_2": "Second grill",
-        "tables_1": "Trucker benches",
-        "tables_2": "More benches",
-        "shop": "Tool shed",
-        "crew_hut": "Staff trailer"
-      },
-      "heat": "Hotter grill",
-      "menu": [
-        "Smash burger",
-        "Double cheese",
-        "Bacon stack",
-        "Trucker's tower"
-      ],
-      "theme": {
-        "grass": [
-          0.78,
-          0.92,
-          0.52
-        ],
-        "dirt": [
-          1.08,
-          0.96,
-          0.86
-        ],
-        "pine_dark": [
-          0.05,
-          0.11,
-          0.06
-        ],
-        "pine_light": [
-          0.4,
-          0.55,
-          0.26
-        ],
-        "leaf_dark": [
-          0.1,
-          0.15,
-          0.05
-        ],
-        "leaf_light": [
-          0.55,
-          0.58,
-          0.22
-        ],
-        "sun": [
-          1.0,
-          0.84,
-          0.64
-        ],
-        "sun_energy": 1.5,
-        "sun_pitch": -32,
-        "sky_top": [
-          0.36,
-          0.48,
-          0.72
-        ],
-        "sky_horizon": [
-          0.95,
-          0.78,
-          0.62
-        ],
-        "ambient": 0.5,
-        "wall": [
-          1.45,
-          1.05,
-          0.75
-        ],
-        "parasol": [
-          0.82,
-          0.16,
-          0.1
-        ]
-      },
-      "special": {
-        "type": "drive_thru",
-        "name": "Drive-thru window",
-        "cost": 350,
-        "requires": [
-          "tables_1",
-          "shop"
-        ],
-        "bonus": 0.35,
-        "desc": "Cars queue on the road and pay 1.5x by card",
-        "intro": "New at the Shack: a drive-thru. Hand dishes through the window, cars pay 1.5x."
-      },
-      "forest": {
-        "jitter": 0.55,
-        "clearings": [
-          [
-            7.6,
-            -14.5,
-            3.4
-          ]
-        ]
-      },
-      "dining": "parasol",
-      "ground_patches": [
-        [
-          12.0,
-          12.4,
-          6.5,
-          1.9
-        ],
-        [
-          10.2,
-          9.6,
-          2.4,
-          1.6
-        ]
-      ]
-    },
-    {
-      "id": "lake",
-      "name": "Lakeside Diner",
-      "tagline": "Fish & chips by the water",
-      "product": "fish",
-      "cooker": "fryer",
-      "guests": "anglers",
-      "builds": {
-        "campfire": "Fish fryer",
-        "fire_2": "Second fryer",
-        "tables_1": "Dock tables",
-        "tables_2": "More tables",
-        "shop": "Tool shed",
-        "crew_hut": "Boathouse"
-      },
-      "heat": "Hotter oil",
-      "menu": [
-        "Fish & chips",
-        "Lemon trout",
-        "Lake platter",
-        "Captain's feast"
-      ],
-      "theme": {
-        "grass": [
-          0.7,
-          1.0,
-          0.7
-        ],
-        "dirt": [
-          1.0,
-          0.98,
-          0.95
-        ],
-        "pine_dark": [
-          0.03,
-          0.1,
-          0.08
-        ],
-        "pine_light": [
-          0.3,
-          0.52,
-          0.34
-        ],
-        "leaf_dark": [
-          0.08,
-          0.16,
-          0.08
-        ],
-        "leaf_light": [
-          0.5,
-          0.66,
-          0.3
-        ],
-        "sun": [
-          0.96,
-          0.98,
-          1.0
-        ],
-        "sun_energy": 1.4,
-        "sun_pitch": -55,
-        "sky_top": [
-          0.26,
-          0.5,
-          0.82
-        ],
-        "sky_horizon": [
-          0.7,
-          0.84,
-          0.92
-        ],
-        "ambient": 0.6,
-        "wall": [
-          1.0,
-          1.15,
-          1.3
-        ],
-        "water": true,
-        "parasol": [
-          0.16,
-          0.42,
-          0.7
-        ]
-      },
-      "special": {
-        "type": "raft",
-        "name": "Timber raft",
-        "cost": 350,
-        "requires": [
-          "tables_1",
-          "shop"
-        ],
-        "bonus": 0.25,
-        "desc": "Float logs to the sawmill for 3x the truck price",
-        "intro": "New at the Lake: a timber raft. Load logs, it sails to the sawmill and pays 3x."
-      },
-      "forest": {
-        "thin_east": 5.0,
-        "clearings": [
-          [
-            -8.0,
-            -19.0,
-            3.0
-          ]
-        ]
-      },
-      "dining": "parasol",
-      "ground_patches": [
-        [
-          14.6,
-          2.0,
-          1.6,
-          2.6
-        ]
-      ]
-    },
-    {
-      "id": "lodge",
-      "name": "Mountain Lodge",
-      "tagline": "Wood-fired pizza for skiers",
-      "product": "pizza",
-      "cooker": "oven",
-      "guests": "skiers",
-      "builds": {
-        "campfire": "Pizza oven",
-        "fire_2": "Second oven",
-        "tables_1": "Lodge tables",
-        "tables_2": "More tables",
-        "shop": "Tool shed",
-        "crew_hut": "Staff chalet"
-      },
-      "heat": "Hotter oven",
-      "menu": [
-        "Margherita",
-        "Pepperoni",
-        "Four cheese",
-        "Lodge supreme"
-      ],
-      "theme": {
-        "grass": [
-          1.55,
-          1.6,
-          1.7
-        ],
-        "dirt": [
-          1.1,
-          1.08,
-          1.1
-        ],
-        "pine_dark": [
-          0.05,
-          0.12,
-          0.1
-        ],
-        "pine_light": [
-          0.62,
-          0.72,
-          0.68
-        ],
-        "leaf_dark": [
-          0.1,
-          0.12,
-          0.1
-        ],
-        "leaf_light": [
-          0.7,
-          0.74,
-          0.7
-        ],
-        "sun": [
-          0.92,
-          0.96,
-          1.0
-        ],
-        "sun_energy": 1.35,
-        "sun_pitch": -40,
-        "sky_top": [
-          0.4,
-          0.56,
-          0.8
-        ],
-        "sky_horizon": [
-          0.86,
-          0.9,
-          0.95
-        ],
-        "ambient": 0.7,
-        "wall": [
-          1.2,
-          0.95,
-          0.8
-        ],
-        "snow": true
-      },
-      "special": {
-        "type": "fireplace",
-        "name": "Lodge fireplace",
-        "cost": 350,
-        "requires": [
-          "tables_1",
-          "shop"
-        ],
-        "bonus": 0.3,
-        "desc": "Keep it burning: warm guests pay +50% and wait longer",
-        "intro": "New at the Lodge: a big fireplace. Keep it fed with logs and guests pay +50%."
-      },
-      "forest": {
-        "spacing": 3.25,
-        "row_gap": 2.95,
-        "jitter": 0.8,
-        "clearings": [
-          [
-            -7.0,
-            -17.5,
-            3.6
-          ],
-          [
-            8.0,
-            -12.5,
-            2.6
-          ]
-        ]
-      },
-      "dining": "lodge",
-      "ground_patches": [
-        [
-          10.6,
-          5.6,
-          2.6,
-          1.8
-        ]
-      ]
-    },
-    {
-      "id": "smoke",
-      "name": "Autumn Smokehouse",
-      "tagline": "Slow-smoked ribs for the harvest fair",
-      "product": "ribs",
-      "cooker": "smoker",
-      "guests": "fairgoers",
-      "builds": {
-        "campfire": "Smoker",
-        "fire_2": "Second smoker",
-        "tables_1": "Barn tables",
-        "tables_2": "More tables",
-        "shop": "Tool shed",
-        "crew_hut": "Red barn"
-      },
-      "heat": "Hotter coals",
-      "menu": [
-        "Pulled pork",
-        "Rack of ribs",
-        "Brisket plate",
-        "Pitmaster platter"
-      ],
-      "theme": {
-        "grass": [
-          0.92,
-          0.86,
-          0.52
-        ],
-        "dirt": [
-          1.04,
-          0.92,
-          0.82
-        ],
-        "pine_dark": [
-          0.09,
-          0.1,
-          0.04
-        ],
-        "pine_light": [
-          0.45,
-          0.48,
-          0.2
-        ],
-        "leaf_dark": [
-          0.3,
-          0.08,
-          0.03
-        ],
-        "leaf_light": [
-          0.98,
-          0.52,
-          0.12
-        ],
-        "sun": [
-          1.0,
-          0.86,
-          0.68
-        ],
-        "sun_energy": 1.45,
-        "sun_pitch": -38,
-        "sky_top": [
-          0.4,
-          0.5,
-          0.7
-        ],
-        "sky_horizon": [
-          0.96,
-          0.8,
-          0.58
-        ],
-        "ambient": 0.55,
-        "wall": [
-          1.6,
-          0.55,
-          0.42
-        ]
-      },
-      "special": {
-        "type": "bell",
-        "name": "Fair bell",
-        "cost": 350,
-        "requires": [
-          "tables_1",
-          "shop"
-        ],
-        "bonus": 0.3,
-        "desc": "Ring it for a harvest-fair rush: crowds pay double",
-        "intro": "New at the Smokehouse: the fair bell. Ring it for a rush of guests paying double."
-      },
-      "forest": {
-        "spacing": 2.85,
-        "row_gap": 2.7,
-        "jitter": 0.06
-      },
-      "dining": "picnic",
-      "ground_patches": [
-        [
-          9.9,
-          1.0,
-          2.0,
-          1.6
-        ],
-        [
-          -5.0,
-          -0.5,
-          2.0,
-          1.4
-        ]
-      ]
-    },
-    {
-      "id": "hotel",
-      "name": "Grand Timber Hotel",
-      "tagline": "Steak dinners for the whole valley",
-      "product": "steak",
-      "cooker": "grill",
-      "guests": "guests",
-      "builds": {
-        "campfire": "Chef's grill",
-        "fire_2": "Second grill",
-        "tables_1": "Terrace tables",
-        "tables_2": "Banquet tables",
-        "shop": "Tool shed",
-        "crew_hut": "Staff wing"
-      },
-      "heat": "Hotter grill",
-      "menu": [
-        "Sirloin",
-        "Ribeye",
-        "T-bone",
-        "Tomahawk feast"
-      ],
-      "theme": {
-        "grass": [
-          0.72,
-          0.92,
-          0.55
-        ],
-        "dirt": [
-          1.0,
-          0.95,
-          0.9
-        ],
-        "pine_dark": [
-          0.03,
-          0.09,
-          0.06
-        ],
-        "pine_light": [
-          0.28,
-          0.46,
-          0.26
-        ],
-        "leaf_dark": [
-          0.06,
-          0.12,
-          0.06
-        ],
-        "leaf_light": [
-          0.36,
-          0.5,
-          0.22
-        ],
-        "sun": [
-          1.0,
-          0.72,
-          0.52
-        ],
-        "sun_energy": 1.25,
-        "sun_pitch": -24,
-        "sky_top": [
-          0.24,
-          0.3,
-          0.52
-        ],
-        "sky_horizon": [
-          0.92,
-          0.62,
-          0.48
-        ],
-        "ambient": 0.5,
-        "wall": [
-          1.25,
-          1.2,
-          1.15
-        ],
-        "parasol": [
-          0.93,
-          0.86,
-          0.66
-        ]
-      },
-      "special": {
-        "type": "van",
-        "name": "Room-service van",
-        "cost": 350,
-        "requires": [
-          "tables_1",
-          "shop"
-        ],
-        "bonus": 0.4,
-        "desc": "Load dishes, the van delivers them for 2x. VIP guests pay 3x",
-        "intro": "New at the Hotel: room service and VIP guests. Load the van, it delivers for 2x."
-      },
-      "forest": {
-        "avenue": [
-          -3.4,
-          1.4
-        ],
-        "jitter": 0.12,
-        "spacing": 2.9
-      },
-      "dining": "round",
-      "ground_patches": [
-        [
-          1.2,
-          6.5,
-          4.2,
-          3.2
-        ],
-        [
-          10.4,
-          5.4,
-          2.2,
-          2.6
-        ]
-      ]
-    }
-  ]
+ "growth": [
+  1,
+  4,
+  14,
+  45,
+  140,
+  420
+ ],
+ "chapters": [
+  {
+   "id": "camp",
+   "name": "Forest Camp",
+   "tagline": "Grilled corn for hungry hikers",
+   "product": "corn",
+   "cooker": "firepit",
+   "guests": "hikers",
+   "builds": {
+    "campfire": "Campfire",
+    "fire_2": "Second fire",
+    "tables_1": "Picnic tables",
+    "tables_2": "More tables",
+    "shop": "Tool shed",
+    "crew_hut": "Crew cabin"
+   },
+   "heat": "Hotter fire",
+   "menu": [
+    "Grilled corn",
+    "Corn + sausage",
+    "Camp skewer",
+    "Hunter's plate"
+   ],
+   "theme": {
+    "grass": [
+     0.8,
+     1.0,
+     0.55
+    ],
+    "dirt": [
+     1.05,
+     0.97,
+     0.9
+    ],
+    "pine_dark": [
+     0.04,
+     0.11,
+     0.06
+    ],
+    "pine_light": [
+     0.36,
+     0.55,
+     0.24
+    ],
+    "leaf_dark": [
+     0.07,
+     0.15,
+     0.05
+    ],
+    "leaf_light": [
+     0.42,
+     0.55,
+     0.2
+    ],
+    "sun": [
+     1.0,
+     0.96,
+     0.88
+    ],
+    "sun_energy": 1.45,
+    "sun_pitch": -52,
+    "sky_top": [
+     0.32,
+     0.52,
+     0.78
+    ],
+    "sky_horizon": [
+     0.72,
+     0.8,
+     0.86
+    ],
+    "ambient": 0.55,
+    "wall": [
+     1.35,
+     1.1,
+     0.85
+    ]
+   },
+   "dining": "picnic",
+   "crowd": {
+    "interval": 4.8,
+    "patience": 50,
+    "max_queue": 7
+   },
+   "group": "A group of hikers is coming down the trail!",
+   "big_day": {
+    "name": "Trail Festival",
+    "desc": "Hikers flood in from the festival. Serve them fast!",
+    "goal": 30,
+    "seconds": 180,
+    "interval": 2.1,
+    "patience_mult": 1.0,
+    "max_walkouts": 10
+   }
+  },
+  {
+   "id": "shack",
+   "name": "Roadside Shack",
+   "tagline": "Smash burgers for long-haul truckers",
+   "product": "burger",
+   "cooker": "grill",
+   "guests": "truckers",
+   "builds": {
+    "campfire": "Burger grill",
+    "fire_2": "Second grill",
+    "tables_1": "Trucker benches",
+    "tables_2": "More benches",
+    "shop": "Tool shed",
+    "crew_hut": "Staff trailer"
+   },
+   "heat": "Hotter grill",
+   "menu": [
+    "Smash burger",
+    "Double cheese",
+    "Bacon stack",
+    "Trucker's tower"
+   ],
+   "theme": {
+    "grass": [
+     0.78,
+     0.92,
+     0.52
+    ],
+    "dirt": [
+     1.08,
+     0.96,
+     0.86
+    ],
+    "pine_dark": [
+     0.05,
+     0.11,
+     0.06
+    ],
+    "pine_light": [
+     0.4,
+     0.55,
+     0.26
+    ],
+    "leaf_dark": [
+     0.1,
+     0.15,
+     0.05
+    ],
+    "leaf_light": [
+     0.55,
+     0.58,
+     0.22
+    ],
+    "sun": [
+     1.0,
+     0.84,
+     0.64
+    ],
+    "sun_energy": 1.5,
+    "sun_pitch": -32,
+    "sky_top": [
+     0.36,
+     0.48,
+     0.72
+    ],
+    "sky_horizon": [
+     0.95,
+     0.78,
+     0.62
+    ],
+    "ambient": 0.5,
+    "wall": [
+     1.45,
+     1.05,
+     0.75
+    ],
+    "parasol": [
+     0.82,
+     0.16,
+     0.1
+    ]
+   },
+   "special": {
+    "type": "drive_thru",
+    "name": "Drive-thru window",
+    "cost": 350,
+    "requires": [
+     "tables_1",
+     "shop"
+    ],
+    "bonus": 0.35,
+    "desc": "Cars queue on the road and pay 1.5x by card",
+    "intro": "New at the Shack: a drive-thru. Hand dishes through the window, cars pay 1.5x."
+   },
+   "forest": {
+    "jitter": 0.55,
+    "clearings": [
+     [
+      7.6,
+      -14.5,
+      3.4
+     ]
+    ]
+   },
+   "dining": "parasol",
+   "ground_patches": [
+    [
+     12.0,
+     12.4,
+     6.5,
+     1.9
+    ],
+    [
+     10.2,
+     9.6,
+     2.4,
+     1.6
+    ]
+   ],
+   "crowd": {
+    "interval": 4.2,
+    "patience": 40,
+    "max_queue": 8
+   },
+   "group": "A convoy of truckers pulled in!",
+   "big_day": {
+    "name": "The Convoy",
+    "desc": "A whole convoy stops at once, at the counter and the drive-thru.",
+    "goal": 36,
+    "seconds": 180,
+    "interval": 1.9,
+    "patience_mult": 0.9,
+    "car_mult": 3.0,
+    "max_walkouts": 12
+   }
+  },
+  {
+   "id": "lake",
+   "name": "Lakeside Diner",
+   "tagline": "Fish & chips by the water",
+   "product": "fish",
+   "cooker": "fryer",
+   "guests": "anglers",
+   "builds": {
+    "campfire": "Fish fryer",
+    "fire_2": "Second fryer",
+    "tables_1": "Dock tables",
+    "tables_2": "More tables",
+    "shop": "Tool shed",
+    "crew_hut": "Boathouse"
+   },
+   "heat": "Hotter oil",
+   "menu": [
+    "Fish & chips",
+    "Lemon trout",
+    "Lake platter",
+    "Captain's feast"
+   ],
+   "theme": {
+    "grass": [
+     0.7,
+     1.0,
+     0.7
+    ],
+    "dirt": [
+     1.0,
+     0.98,
+     0.95
+    ],
+    "pine_dark": [
+     0.03,
+     0.1,
+     0.08
+    ],
+    "pine_light": [
+     0.3,
+     0.52,
+     0.34
+    ],
+    "leaf_dark": [
+     0.08,
+     0.16,
+     0.08
+    ],
+    "leaf_light": [
+     0.5,
+     0.66,
+     0.3
+    ],
+    "sun": [
+     0.96,
+     0.98,
+     1.0
+    ],
+    "sun_energy": 1.4,
+    "sun_pitch": -55,
+    "sky_top": [
+     0.26,
+     0.5,
+     0.82
+    ],
+    "sky_horizon": [
+     0.7,
+     0.84,
+     0.92
+    ],
+    "ambient": 0.6,
+    "wall": [
+     1.0,
+     1.15,
+     1.3
+    ],
+    "water": true,
+    "parasol": [
+     0.16,
+     0.42,
+     0.7
+    ]
+   },
+   "special": {
+    "type": "raft",
+    "name": "Timber raft",
+    "cost": 350,
+    "requires": [
+     "tables_1",
+     "shop"
+    ],
+    "bonus": 0.25,
+    "desc": "Float logs to the sawmill for 3x the truck price",
+    "intro": "New at the Lake: a timber raft. Load logs, it sails to the sawmill and pays 3x."
+   },
+   "forest": {
+    "thin_east": 5.0,
+    "clearings": [
+     [
+      -8.0,
+      -19.0,
+      3.0
+     ]
+    ]
+   },
+   "dining": "parasol",
+   "ground_patches": [
+    [
+     14.6,
+     2.0,
+     1.6,
+     2.6
+    ]
+   ],
+   "crowd": {
+    "interval": 4.6,
+    "patience": 52,
+    "max_queue": 8,
+    "order_bonus": 1
+   },
+   "group": "A boat full of anglers just docked!",
+   "big_day": {
+    "name": "Fishing Tournament",
+    "desc": "Every angler on the lake wants a feast. Big orders!",
+    "goal": 36,
+    "seconds": 180,
+    "interval": 2.1,
+    "patience_mult": 1.0,
+    "order_bonus": 1,
+    "max_walkouts": 12
+   }
+  },
+  {
+   "id": "lodge",
+   "name": "Mountain Lodge",
+   "tagline": "Wood-fired pizza for skiers",
+   "product": "pizza",
+   "cooker": "oven",
+   "guests": "skiers",
+   "builds": {
+    "campfire": "Pizza oven",
+    "fire_2": "Second oven",
+    "tables_1": "Lodge tables",
+    "tables_2": "More tables",
+    "shop": "Tool shed",
+    "crew_hut": "Staff chalet"
+   },
+   "heat": "Hotter oven",
+   "menu": [
+    "Margherita",
+    "Pepperoni",
+    "Four cheese",
+    "Lodge supreme"
+   ],
+   "theme": {
+    "grass": [
+     1.55,
+     1.6,
+     1.7
+    ],
+    "dirt": [
+     1.1,
+     1.08,
+     1.1
+    ],
+    "pine_dark": [
+     0.05,
+     0.12,
+     0.1
+    ],
+    "pine_light": [
+     0.62,
+     0.72,
+     0.68
+    ],
+    "leaf_dark": [
+     0.1,
+     0.12,
+     0.1
+    ],
+    "leaf_light": [
+     0.7,
+     0.74,
+     0.7
+    ],
+    "sun": [
+     0.92,
+     0.96,
+     1.0
+    ],
+    "sun_energy": 1.35,
+    "sun_pitch": -40,
+    "sky_top": [
+     0.4,
+     0.56,
+     0.8
+    ],
+    "sky_horizon": [
+     0.86,
+     0.9,
+     0.95
+    ],
+    "ambient": 0.7,
+    "wall": [
+     1.2,
+     0.95,
+     0.8
+    ],
+    "snow": true
+   },
+   "special": {
+    "type": "fireplace",
+    "name": "Lodge fireplace",
+    "cost": 350,
+    "requires": [
+     "tables_1",
+     "shop"
+    ],
+    "bonus": 0.3,
+    "desc": "Keep it burning: warm guests pay +50% and wait longer",
+    "intro": "New at the Lodge: a big fireplace. Keep it fed with logs and guests pay +50%."
+   },
+   "forest": {
+    "spacing": 3.25,
+    "row_gap": 2.95,
+    "jitter": 0.8,
+    "clearings": [
+     [
+      -7.0,
+      -17.5,
+      3.6
+     ],
+     [
+      8.0,
+      -12.5,
+      2.6
+     ]
+    ]
+   },
+   "dining": "lodge",
+   "ground_patches": [
+    [
+     10.6,
+     5.6,
+     2.6,
+     1.8
+    ]
+   ],
+   "crowd": {
+    "interval": 4.0,
+    "patience": 40,
+    "max_queue": 9
+   },
+   "group": "A ski class came in from the cold!",
+   "big_day": {
+    "name": "Blizzard",
+    "desc": "Frozen skiers pour in. Without a burning fire they won't wait long.",
+    "goal": 40,
+    "seconds": 180,
+    "interval": 1.8,
+    "patience_mult": 0.6,
+    "max_walkouts": 13
+   }
+  },
+  {
+   "id": "smoke",
+   "name": "Autumn Smokehouse",
+   "tagline": "Slow-smoked ribs for the harvest fair",
+   "product": "ribs",
+   "cooker": "smoker",
+   "guests": "fairgoers",
+   "builds": {
+    "campfire": "Smoker",
+    "fire_2": "Second smoker",
+    "tables_1": "Barn tables",
+    "tables_2": "More tables",
+    "shop": "Tool shed",
+    "crew_hut": "Red barn"
+   },
+   "heat": "Hotter coals",
+   "menu": [
+    "Pulled pork",
+    "Rack of ribs",
+    "Brisket plate",
+    "Pitmaster platter"
+   ],
+   "theme": {
+    "grass": [
+     0.92,
+     0.86,
+     0.52
+    ],
+    "dirt": [
+     1.04,
+     0.92,
+     0.82
+    ],
+    "pine_dark": [
+     0.09,
+     0.1,
+     0.04
+    ],
+    "pine_light": [
+     0.45,
+     0.48,
+     0.2
+    ],
+    "leaf_dark": [
+     0.3,
+     0.08,
+     0.03
+    ],
+    "leaf_light": [
+     0.98,
+     0.52,
+     0.12
+    ],
+    "sun": [
+     1.0,
+     0.86,
+     0.68
+    ],
+    "sun_energy": 1.45,
+    "sun_pitch": -38,
+    "sky_top": [
+     0.4,
+     0.5,
+     0.7
+    ],
+    "sky_horizon": [
+     0.96,
+     0.8,
+     0.58
+    ],
+    "ambient": 0.55,
+    "wall": [
+     1.6,
+     0.55,
+     0.42
+    ]
+   },
+   "special": {
+    "type": "bell",
+    "name": "Fair bell",
+    "cost": 350,
+    "requires": [
+     "tables_1",
+     "shop"
+    ],
+    "bonus": 0.3,
+    "desc": "Ring it for a harvest-fair rush: crowds pay double",
+    "intro": "New at the Smokehouse: the fair bell. Ring it for a rush of guests paying double."
+   },
+   "forest": {
+    "spacing": 2.85,
+    "row_gap": 2.7,
+    "jitter": 0.06
+   },
+   "dining": "picnic",
+   "ground_patches": [
+    [
+     9.9,
+     1.0,
+     2.0,
+     1.6
+    ],
+    [
+     -5.0,
+     -0.5,
+     2.0,
+     1.4
+    ]
+   ],
+   "crowd": {
+    "interval": 3.6,
+    "patience": 40,
+    "max_queue": 10
+   },
+   "group": "The fair parade is heading your way!",
+   "big_day": {
+    "name": "Fair Finale",
+    "desc": "The judges are watching. Every guest you lose walks to Grayline's stand.",
+    "goal": 44,
+    "seconds": 180,
+    "interval": 1.6,
+    "patience_mult": 0.9,
+    "max_walkouts": 14
+   }
+  },
+  {
+   "id": "hotel",
+   "name": "Grand Timber Hotel",
+   "tagline": "Steak dinners for the whole valley",
+   "product": "steak",
+   "cooker": "grill",
+   "guests": "guests",
+   "builds": {
+    "campfire": "Chef's grill",
+    "fire_2": "Second grill",
+    "tables_1": "Terrace tables",
+    "tables_2": "Banquet tables",
+    "shop": "Tool shed",
+    "crew_hut": "Staff wing"
+   },
+   "heat": "Hotter grill",
+   "menu": [
+    "Sirloin",
+    "Ribeye",
+    "T-bone",
+    "Tomahawk feast"
+   ],
+   "theme": {
+    "grass": [
+     0.72,
+     0.92,
+     0.55
+    ],
+    "dirt": [
+     1.0,
+     0.95,
+     0.9
+    ],
+    "pine_dark": [
+     0.03,
+     0.09,
+     0.06
+    ],
+    "pine_light": [
+     0.28,
+     0.46,
+     0.26
+    ],
+    "leaf_dark": [
+     0.06,
+     0.12,
+     0.06
+    ],
+    "leaf_light": [
+     0.36,
+     0.5,
+     0.22
+    ],
+    "sun": [
+     1.0,
+     0.72,
+     0.52
+    ],
+    "sun_energy": 1.25,
+    "sun_pitch": -24,
+    "sky_top": [
+     0.24,
+     0.3,
+     0.52
+    ],
+    "sky_horizon": [
+     0.92,
+     0.62,
+     0.48
+    ],
+    "ambient": 0.5,
+    "wall": [
+     1.25,
+     1.2,
+     1.15
+    ],
+    "parasol": [
+     0.93,
+     0.86,
+     0.66
+    ]
+   },
+   "special": {
+    "type": "van",
+    "name": "Room-service van",
+    "cost": 350,
+    "requires": [
+     "tables_1",
+     "shop"
+    ],
+    "bonus": 0.4,
+    "desc": "Load dishes, the van delivers them for 2x. VIP guests pay 3x",
+    "intro": "New at the Hotel: room service and VIP guests. Load the van, it delivers for 2x."
+   },
+   "forest": {
+    "avenue": [
+     -3.4,
+     1.4
+    ],
+    "jitter": 0.12,
+    "spacing": 2.9
+   },
+   "dining": "round",
+   "ground_patches": [
+    [
+     1.2,
+     6.5,
+     4.2,
+     3.2
+    ],
+    [
+     10.4,
+     5.4,
+     2.2,
+     2.6
+    ]
+   ],
+   "crowd": {
+    "interval": 3.8,
+    "patience": 42,
+    "max_queue": 10
+   },
+   "group": "A tour bus pulled up at the hotel!",
+   "big_day": {
+    "name": "The Critic",
+    "desc": "The food critic arrives with a VIP party. Her review decides the hotel's future.",
+    "goal": 42,
+    "seconds": 180,
+    "interval": 1.8,
+    "patience_mult": 0.9,
+    "vip_share": 0.5,
+    "max_walkouts": 12
+   }
+  }
+ ]
 }

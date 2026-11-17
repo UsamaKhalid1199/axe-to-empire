@@ -1,6 +1,7 @@
 class_name Worker
 extends Agent
 ## Crew member. role: lumberjack (chop -> woodpile), waiter (rack -> counter), cook (stands at a fire).
+## The crew is slower than the player and never sells logs: a full woodpile means they wait.
 
 var role := "lumberjack"
 var state := "idle"
@@ -101,7 +102,8 @@ func _lumberjack(delta: float) -> void:
 				if back.count() == 0:
 					state = "idle"
 				elif not world.pile_put_from(back):
-					_go_sell()     # pile filled up while unloading: sell the rest
+					state = "rest"     # pile filled up while unloading: wait for the kitchen to use some
+					timer = 2.0
 		"to_station":
 			if walk(delta):
 				state = "feed"
@@ -115,30 +117,28 @@ func _lumberjack(delta: float) -> void:
 					state = "idle"
 				elif not world.specials.log_put(back):
 					_deliver(true)
-		"to_truck":
-			if walk(delta):
-				state = "sell"
-				timer = 0.0
-		"sell":
+		"rest":
 			timer -= delta
 			rig.play("idle")
 			if timer <= 0.0:
-				timer = 0.18
-				if not world.sell_log_from(back, self):
+				timer = 1.5
+				if back.count() == 0:
 					state = "idle"
+				elif not world.pile_full():
+					state = "drop"
+				elif world.specials.crew_allowed() and world.specials.type == "raft" and world.specials.log_need() > 0:
+					_go_station()
 
 
 ## Kitchen needs wood → woodpile; a cold lodge fireplace gets logs first once the pile has some;
-## woodpile full → the timber raft (3x) if there is one, else sell at the truck.
+## woodpile full → the timber raft (3x) once the station is level 5, else wait at the pile.
 func _deliver(skip_station := false) -> void:
 	var sp: Specials = world.specials
-	if not skip_station and sp.type == "fireplace" and sp.log_need() > 0 and int(Game.sp.get("fuel", 0)) < 6 and Game.woodpile >= 6:
+	var crew_ok := not skip_station and sp.crew_allowed()
+	if crew_ok and sp.type == "fireplace" and sp.log_need() > 0 and int(Game.sp.get("fuel", 0)) < 6 and Game.woodpile >= 6:
 		_go_station()
-	elif world.pile_full():
-		if not skip_station and sp.type == "raft" and sp.log_need() > 0:
-			_go_station()
-		else:
-			_go_sell()
+	elif world.pile_full() and crew_ok and sp.type == "raft" and sp.log_need() > 0:
+		_go_station()
 	else:
 		state = "to_pile"
 		go([world.pile_zone.global_position + Vector3(0.6, 0, -0.5)])
@@ -149,14 +149,9 @@ func _go_station() -> void:
 	go([world.specials.log_pos() + Vector3(0.3 * fire_index, 0, -0.4 + 0.4 * fire_index)])
 
 
-func _go_sell() -> void:
-	state = "to_truck"
-	go([world.sell_zone.global_position + Vector3(0.5 + fire_index * 0.45, 0, -0.6)])
-
-
 func _waiter(delta: float) -> void:
 	carry_anim = hands.count() > 0
-	var carry := int(Game.cfg.worker.carry)
+	var carry := int(Game.cfg.worker.get("waiter_carry", 2))
 	match state:
 		"idle":
 			go([world.rack_zone.global_position + Vector3(0.5 + fire_index * 0.5, 0, 0)])

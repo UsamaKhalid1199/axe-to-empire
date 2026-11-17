@@ -1,48 +1,363 @@
 {
   "version": 2,
-  "player": { "speed": 4.6, "carry_dishes": 4 },
+  "player": {
+    "speed": 4.6,
+    "carry_dishes": 4
+  },
   "tools": [
-    { "id": "axe",        "name": "Axe",        "cost": 0,    "dmg": 1, "interval": 0.80, "range": 1.55, "move_chop": false, "aoe": 1, "desc": "One tree at a time. Stand still to swing." },
-    { "id": "double_axe", "name": "Double Axe", "cost": 220,  "dmg": 2, "interval": 0.72, "range": 1.65, "move_chop": false, "aoe": 1, "desc": "Two logs per swing." },
-    { "id": "chainsaw",   "name": "Chainsaw",   "cost": 1400, "dmg": 1, "interval": 0.16, "range": 1.85, "move_chop": true,  "aoe": 1, "desc": "Cuts while you run." },
-    { "id": "harvester",  "name": "Harvester",  "cost": 6500, "dmg": 1, "interval": 0.12, "range": 2.90, "move_chop": true,  "aoe": 4, "desc": "Ride it. Clears four trees at once." }
+    {
+      "id": "axe",
+      "name": "Axe",
+      "cost": 0,
+      "dmg": 1,
+      "interval": 0.8,
+      "range": 1.55,
+      "move_chop": false,
+      "aoe": 1,
+      "desc": "One tree at a time. Stand still to swing."
+    },
+    {
+      "id": "double_axe",
+      "name": "Double Axe",
+      "cost": 220,
+      "dmg": 2,
+      "interval": 0.72,
+      "range": 1.65,
+      "move_chop": false,
+      "aoe": 1,
+      "desc": "Two logs per swing."
+    },
+    {
+      "id": "chainsaw",
+      "name": "Chainsaw",
+      "cost": 1400,
+      "dmg": 1,
+      "interval": 0.16,
+      "range": 1.85,
+      "move_chop": true,
+      "aoe": 1,
+      "desc": "Cuts while you run."
+    },
+    {
+      "id": "harvester",
+      "name": "Harvester",
+      "cost": 6500,
+      "dmg": 1,
+      "interval": 0.12,
+      "range": 2.9,
+      "move_chop": true,
+      "aoe": 4,
+      "desc": "Ride it. Clears four trees at once."
+    }
   ],
-  "bag":   [ { "cap": 10, "cost": 0 }, { "cap": 14, "cost": 90 }, { "cap": 18, "cost": 320 }, { "cap": 26, "cost": 900 }, { "cap": 36, "cost": 2400 } ],
-  "boots": [ { "mult": 1.0, "cost": 0 }, { "mult": 1.12, "cost": 140 }, { "mult": 1.25, "cost": 520 }, { "mult": 1.4, "cost": 1600 } ],
-  "fire":  [ { "cook": 3.6, "cost": 0 }, { "cook": 2.9, "cost": 260 }, { "cook": 2.3, "cost": 850 }, { "cook": 1.8, "cost": 2200 } ],
-  "menu":  [ { "price": 10, "name": "Grilled corn", "cost": 0 }, { "price": 13, "name": "Corn + sausage", "cost": 300 }, { "price": 17, "name": "Camp skewer", "cost": 950 }, { "price": 22, "name": "Hunter's plate", "cost": 2500 } ],
-  "tree":  { "hp": 4, "regrow": 45.0 },
+  "bag": [
+    {
+      "cap": 10,
+      "cost": 0
+    },
+    {
+      "cap": 14,
+      "cost": 90
+    },
+    {
+      "cap": 18,
+      "cost": 320
+    },
+    {
+      "cap": 26,
+      "cost": 900
+    },
+    {
+      "cap": 36,
+      "cost": 2400
+    }
+  ],
+  "boots": [
+    {
+      "mult": 1.0,
+      "cost": 0
+    },
+    {
+      "mult": 1.12,
+      "cost": 140
+    },
+    {
+      "mult": 1.25,
+      "cost": 520
+    },
+    {
+      "mult": 1.4,
+      "cost": 1600
+    }
+  ],
+  "fire": [
+    {
+      "cook": 3.6,
+      "cost": 0
+    },
+    {
+      "cook": 2.9,
+      "cost": 260
+    },
+    {
+      "cook": 2.3,
+      "cost": 850
+    },
+    {
+      "cook": 1.8,
+      "cost": 2200
+    }
+  ],
+  "menu": [
+    {
+      "price": 10,
+      "name": "Grilled corn",
+      "cost": 0
+    },
+    {
+      "price": 13,
+      "name": "Corn + sausage",
+      "cost": 300
+    },
+    {
+      "price": 17,
+      "name": "Camp skewer",
+      "cost": 950
+    },
+    {
+      "price": 22,
+      "name": "Hunter's plate",
+      "cost": 2500
+    }
+  ],
+  "tree": {
+    "hp": 4,
+    "regrow": 45.0
+  },
   "log_sell_price": 2,
   "woodpile_cap": 48,
   "rack_cap": 12,
   "dishes_per_log": 2,
   "builds": [
-    { "id": "campfire", "name": "Campfire",       "cost": 24,  "requires": [],                      "desc": "Cook corn for hungry hikers" },
-    { "id": "tables_1", "name": "Picnic tables",  "cost": 70,  "requires": ["campfire"],            "desc": "Seated guests tip and stay happier" },
-    { "id": "shop",     "name": "Tool shed",      "cost": 80,  "requires": ["campfire"],            "desc": "Better tools, bigger backpack" },
-    { "id": "crew_hut", "name": "Crew cabin",     "cost": 220, "requires": ["shop"],                "desc": "Hire people to work for you" },
-    { "id": "fire_2",   "name": "Second fire",    "cost": 420, "requires": ["tables_1", "shop"],   "desc": "Double the cooking" },
-    { "id": "tables_2", "name": "More tables",    "cost": 600, "requires": ["fire_2"],              "desc": "More guests at once" },
-    { "id": "gate",     "name": "Roadside Shack", "cost": 0,   "requires": ["tables_2", "crew_hut"], "desc": "Next venue" }
+    {
+      "id": "campfire",
+      "name": "Campfire",
+      "cost": 24,
+      "requires": [],
+      "desc": "Cook corn for hungry hikers"
+    },
+    {
+      "id": "tables_1",
+      "name": "Picnic tables",
+      "cost": 70,
+      "requires": [
+        "campfire"
+      ],
+      "desc": "Seated guests tip and stay happier"
+    },
+    {
+      "id": "shop",
+      "name": "Tool shed",
+      "cost": 80,
+      "requires": [
+        "campfire"
+      ],
+      "desc": "Better tools, bigger backpack"
+    },
+    {
+      "id": "crew_hut",
+      "name": "Crew cabin",
+      "cost": 220,
+      "requires": [
+        "shop"
+      ],
+      "desc": "Hire people to work for you"
+    },
+    {
+      "id": "fire_2",
+      "name": "Second fire",
+      "cost": 420,
+      "requires": [
+        "tables_1",
+        "shop"
+      ],
+      "desc": "Double the cooking"
+    },
+    {
+      "id": "tables_2",
+      "name": "More tables",
+      "cost": 600,
+      "requires": [
+        "fire_2"
+      ],
+      "desc": "More guests at once"
+    },
+    {
+      "id": "gate",
+      "name": "Roadside Shack",
+      "cost": 0,
+      "requires": [
+        "tables_2",
+        "crew_hut"
+      ],
+      "desc": "Next venue"
+    }
   ],
   "crew": {
-    "lumberjack": { "name": "Lumberjack", "max": 3, "costs": [220, 700, 1800], "desc": "Chops trees and stacks the woodpile" },
-    "waiter":     { "name": "Waiter",     "max": 2, "costs": [380, 1300],      "desc": "Carries dishes to the counter" },
-    "cook":       { "name": "Cook",       "max": 2, "costs": [500, 1600],      "desc": "Each cook makes fires 30% faster" }
+    "lumberjack": {
+      "name": "Lumberjack",
+      "max": 3,
+      "costs": [
+        600,
+        1800,
+        4500
+      ],
+      "desc": "Chops trees and keeps the woodpile stocked"
+    },
+    "waiter": {
+      "name": "Waiter",
+      "max": 2,
+      "costs": [
+        900,
+        2800
+      ],
+      "desc": "Carries 2 dishes at a time to the counter"
+    },
+    "cook": {
+      "name": "Cook",
+      "max": 2,
+      "costs": [
+        1200,
+        3500
+      ],
+      "desc": "Each cook makes the kitchen 30% faster"
+    }
   },
-  "worker": { "speed": 2.9, "chop_interval": 1.25, "carry": 4 },
+  "worker": {
+    "speed": 2.4,
+    "chop_interval": 1.6,
+    "carry": 4,
+    "waiter_carry": 2
+  },
   "customers": {
-    "interval": 8.5, "per_table_bonus": 0.18, "max_queue": 4, "patience": 60.0,
-    "order_min": 1, "order_max": 2, "eat_time": 7.0, "seated_tip": 0.25,
-    "speed": 1.55
+    "interval": 3.2,
+    "per_table_bonus": 0.12,
+    "max_queue": 7,
+    "queue_cap": 12,
+    "patience": 36.0,
+    "order_min": 1,
+    "order_max": 2,
+    "eat_time": 7.0,
+    "seated_tip": 0.25,
+    "speed": 1.55,
+    "happy_bonus": 0.2,
+    "hands_on_bonus": 0.25,
+    "group_every": [
+      120,
+      180
+    ],
+    "group_size": [
+      3,
+      5
+    ]
   },
-  "gate": { "coins": 4000, "rating": 4.0, "served": 140 },
-  "offline": { "efficiency": 0.5, "cap_hours": 2.0, "min_away_s": 120 },
+  "gate": {
+    "coins": 4000,
+    "rating": 4.0,
+    "served": 140
+  },
+  "offline": {
+    "efficiency": 0.25,
+    "cap_hours": 1.0,
+    "cap_per_venue_h": 0.5,
+    "cap_max_h": 4.0,
+    "min_away_s": 120
+  },
   "jobs": [
-    { "id": "chop",  "text": "Chop {n} trees",       "base": 12, "per_day": 4, "reward_mult": 1.0 },
-    { "id": "serve", "text": "Serve {n} guests",     "base": 15, "per_day": 5, "reward_mult": 1.2 },
-    { "id": "sell",  "text": "Sell {n} logs at the truck", "base": 20, "per_day": 6, "reward_mult": 0.8 },
-    { "id": "earn",  "text": "Earn {n} coins",       "base": 300, "per_day": 120, "reward_mult": 1.0 }
+    {
+      "id": "chop",
+      "text": "Chop {n} trees",
+      "base": 12,
+      "per_day": 4,
+      "reward_mult": 1.0
+    },
+    {
+      "id": "serve",
+      "text": "Serve {n} guests",
+      "base": 15,
+      "per_day": 5,
+      "reward_mult": 1.2
+    },
+    {
+      "id": "sell",
+      "text": "Sell {n} logs at the truck",
+      "base": 20,
+      "per_day": 6,
+      "reward_mult": 0.8
+    },
+    {
+      "id": "earn",
+      "text": "Earn {n} coins",
+      "base": 300,
+      "per_day": 120,
+      "reward_mult": 1.0
+    }
   ],
-  "streak_rewards": [50, 80, 120, 160, 220, 300, 500]
+  "streak_rewards": [
+    50,
+    80,
+    120,
+    160,
+    220,
+    300,
+    500
+  ],
+  "stations": {
+    "max": 25,
+    "milestones": {
+      "5": 120,
+      "10": 600,
+      "15": 1800,
+      "20": 3600,
+      "25": 7200
+    },
+    "kitchen": {
+      "name": "Kitchen",
+      "c0": 160,
+      "g": 1.3,
+      "desc": "Cook every dish faster"
+    },
+    "menu": {
+      "name": "Menu",
+      "c0": 200,
+      "g": 1.3,
+      "desc": "Every dish sells for more"
+    },
+    "dining": {
+      "name": "Dining",
+      "c0": 140,
+      "g": 1.3,
+      "desc": "Guests wait longer and tip more"
+    },
+    "sign": {
+      "name": "Signboard",
+      "c0": 180,
+      "g": 1.3,
+      "desc": "More guests stop by"
+    },
+    "station": {
+      "name": "Signature station",
+      "c0": 300,
+      "g": 1.3,
+      "desc": "Bigger station bonus. Level 5: crew uses it"
+    }
+  },
+  "golden": {
+    "every": [
+      150,
+      210
+    ],
+    "life": 25.0,
+    "reward_dishes": 15
+  }
 }

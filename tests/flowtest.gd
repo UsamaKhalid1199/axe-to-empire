@@ -15,6 +15,9 @@ func _run() -> void:
 	g.offline_reward = 0
 	g.coins = 0; g.served = 0; g.built = {}; g.pad_paid = {}; g.chapter_done = false
 	g.venue = 0; g.unlocked = 1; g.venues = []; g.vserved = 0; g.prestige = 0; g.cfg = g.chapter_cfg(0)
+	g.reno = {}; g.bigday = {}; g.seen = {}; g.task_i = 0; g.task_base = 0; g.golden_n = 0
+	g.levels = {"tool": 0, "bag": 0, "boots": 0, "fire": 0, "menu": 0, "dining": 0, "sign": 0, "station": 0}
+	g.settings.story = false
 	change_scene_to_file("res://scenes/main.tscn")
 	await _ready_scene()
 	# --- chapter 1 completed state
@@ -23,6 +26,12 @@ func _run() -> void:
 	g.levels.fire = 2; g.levels.menu = 1
 	g.vserved = 200; g.served = 200; g.rating_hist = [5.0, 5.0]
 	g.coins = 5000
+	ok(not g.gate_ready() and g.big_day_ready(), "gate waits for the Big Day once everything is built")
+	ok(current_scene.world.start_big_day(), "Big Day starts")
+	current_scene.world.bd_served = 999
+	await create_timer(0.3).timeout
+	ok(g.bigday.get("won", false) and not current_scene.world.bd_active, "Big Day won when the goal is served")
+	ok(g.stars()[0], "first star for the Big Day")
 	ok(g.gate_ready(), "gate ready with checklist done")
 	g.open_next_venue()
 	ok(g.coins == 1000, "gate costs 4000 (coins=%d)" % g.coins)

@@ -248,12 +248,40 @@ static func broadleaf_mesh(variant: int) -> ArrayMesh:
 		return mesh)
 
 
-static func coin_mesh() -> CylinderMesh:
+## A bundle of green banknotes with a paper band (the game's cash).
+static func coin_mesh() -> Mesh:
 	return _c("coin", func():
-		var m := CylinderMesh.new()
-		m.top_radius = 0.1; m.bottom_radius = 0.1; m.height = 0.03; m.radial_segments = 16; m.rings = 1
-		m.material = paint(Color(1.0, 0.76, 0.22), 0.28, 0.9)
+		var st := SurfaceTool.new()
+		st.begin(Mesh.PRIMITIVE_TRIANGLES)
+		var green := Color(0.36, 0.66, 0.38)
+		var band := Color(0.93, 0.9, 0.78)
+		_box_into(st, Vector3(0.24, 0.035, 0.12), Vector3.ZERO, green)
+		_box_into(st, Vector3(0.05, 0.04, 0.125), Vector3.ZERO, band)
+		var m := st.commit()
+		var mat := StandardMaterial3D.new()
+		mat.vertex_color_use_as_albedo = true
+		mat.roughness = 0.75
+		mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+		m.surface_set_material(0, mat)
 		return m)
+
+
+static func _box_into(st: SurfaceTool, size: Vector3, at: Vector3, col: Color) -> void:
+	var h := size * 0.5
+	var faces := [
+		[Vector3.UP, [Vector3(-h.x, h.y, -h.z), Vector3(h.x, h.y, -h.z), Vector3(h.x, h.y, h.z), Vector3(-h.x, h.y, h.z)]],
+		[Vector3.DOWN, [Vector3(-h.x, -h.y, h.z), Vector3(h.x, -h.y, h.z), Vector3(h.x, -h.y, -h.z), Vector3(-h.x, -h.y, -h.z)]],
+		[Vector3.FORWARD, [Vector3(h.x, -h.y, -h.z), Vector3(h.x, h.y, -h.z), Vector3(-h.x, h.y, -h.z), Vector3(-h.x, -h.y, -h.z)]],
+		[Vector3.BACK, [Vector3(-h.x, -h.y, h.z), Vector3(-h.x, h.y, h.z), Vector3(h.x, h.y, h.z), Vector3(h.x, -h.y, h.z)]],
+		[Vector3.LEFT, [Vector3(-h.x, -h.y, -h.z), Vector3(-h.x, h.y, -h.z), Vector3(-h.x, h.y, h.z), Vector3(-h.x, -h.y, h.z)]],
+		[Vector3.RIGHT, [Vector3(h.x, -h.y, h.z), Vector3(h.x, h.y, h.z), Vector3(h.x, h.y, -h.z), Vector3(h.x, -h.y, -h.z)]],
+	]
+	for f in faces:
+		var v: Array = f[1]
+		for idx in [0, 1, 2, 0, 2, 3]:
+			st.set_color(col)
+			st.set_normal(f[0])
+			st.add_vertex(at + v[idx])
 
 
 ## Serving of the active chapter's product (corn, burger, fish, pizza, ribs, steak).

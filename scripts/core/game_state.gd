@@ -6,6 +6,9 @@ signal state_changed            # anything upgrade/build/crew related
 signal rating_changed(value: float)
 signal toast(text: String)
 signal jobs_changed
+signal story(beats: Array)          # story cards to show (portrait + line)
+signal task_changed
+signal offline_ready                # away earnings computed after a resume
 
 const SAVE_PATH := "user://save_v2.json"
 const BACKUP_PATH := "user://save_v2.bak"
@@ -31,17 +34,32 @@ var coins: int = 0
 var served: int = 0
 var built: Dictionary = {}          # build id -> true
 var pad_paid: Dictionary = {}       # build id -> coins paid so far
-var levels := {"tool": 0, "bag": 0, "boots": 0, "fire": 0, "menu": 0}
+var levels := {"tool": 0, "bag": 0, "boots": 0, "fire": 0, "menu": 0, "dining": 0, "sign": 0, "station": 0}
 var crew := {"lumberjack": 0, "waiter": 0, "cook": 0}
 var rating_hist: Array = []         # last 40 scores (1..5)
-var stats := {"trees": 0, "logs": 0, "served": 0, "earned": 0, "sold": 0, "play_s": 0.0}
+var stats := {"trees": 0, "logs": 0, "served": 0, "earned": 0, "sold": 0, "play_s": 0.0, "lost": 0, "walkouts": 0, "golden": 0, "bigdays": 0}
 var chapter_done := false
 var ftue := 0
 var woodpile := 0
 var rack := 0
 var counter_coins := 0
 var sp: Dictionary = {}             # the active venue's signature-station state (fuel, raft, van, ...)
+## Per-venue long-term state (stashed with the venue): renovation in progress, Big Day, stars,
+## story cards seen, task chain position.
+var reno: Dictionary = {}           # {"id": station, "end": unix} while a milestone level is being built
+var bigday: Dictionary = {}         # {"won": bool, "clean": bool, "tries": int}
+var seen: Dictionary = {}           # story beat key -> true
+var task_i := 0
+var task_base := 0                  # counter value when the current task started (serve / golden)
+var golden_n := 0                   # golden trees felled at this venue
+var walkouts := 0
+var story_data: Dictionary = {}
 var mute := false
+## Player settings beyond sound on/off.
+var settings := {"music": true, "sfx": true, "vibration": true, "show_fps": false, "story": true}
+## Player profile: wardrobe (owned / equipped outfit pieces), name. See scripts/core/wardrobe.gd.
+var profile := {"owned": ["shirt_orange", "hat_none", "hat_hardhat", "pants_dark"], "equipped": {"shirt": "shirt_orange", "hat": "hat_hardhat", "pants": "pants_dark"}}
+signal profile_changed
 ## Graphics: 0 smooth, 1 balanced, 2 beautiful. quality_auto lets the game drop a level when fps stays low.
 var quality := 1
 var quality_auto := true
@@ -58,6 +76,14 @@ var chest_claimed := false
 
 var last_save_unix := 0
 var offline_reward := 0             # computed on load, shown by UI
+var _cc_cache := {}                 # read-only chapter configs for background venues (stars, rates)
+
+
+## Cached chapter config for read-only use; callers must not modify it.
+func _cc(k: int) -> Dictionary:
+	if not _cc_cache.has(k):
+		_cc_cache[k] = chapter_cfg(k)
+	return _cc_cache[k]
 var offline_seconds := 0
 var _save_timer := 0.0
 
@@ -70,6 +96,7 @@ func _ready() -> void:
 	var cd: Dictionary = JSON.parse_string(cf.get_as_text())
 	chapters = cd.chapters
 	growth = cd.growth
+	story_data = JSON.parse_string(FileAccess.get_file_as_string("res://data/story.json"))
 	cfg = chapter_cfg(0)
 	load_game()
 	cfg = chapter_cfg(venue)
@@ -77,8 +104,16 @@ func _ready() -> void:
 
 
 func _process(delta: float) -> void:
+	if _in_background:
+		return
 	stats.play_s += delta
 	_empire_tick(delta)
+	if Engine.time_scale != 1.0:
+		_skew += delta - delta / Engine.time_scale
+	_reno_t -= delta
+	if _reno_t <= 0.0:
+		_reno_t = 0.5
+		_reno_tick()
 	_save_timer += delta
 	if _save_timer > 8.0:
 		_save_timer = 0.0
@@ -89,6 +124,35 @@ func _notification(what: int) -> void:
 	if what == NOTIFICATION_APPLICATION_PAUSED or what == NOTIFICATION_WM_CLOSE_REQUEST \
 			or what == NOTIFICATION_APPLICATION_FOCUS_OUT:
 		save_game()
+	if not OS.has_feature("mobile"):
+		return
+	if what == NOTIFICATION_APPLICATION_PAUSED:
+		if not _in_background:
+			_in_background = true
+			get_tree().paused = true
+			AudioServer.set_bus_mute(0, true)
+	elif what == NOTIFICATION_APPLICATION_RESUMED:
+		if _in_background:
+			_in_background = false
+			get_tree().paused = false
+			AudioServer.set_bus_mute(0, mute)
+			_compute_offline(last_save_unix)
+			last_save_unix = int(Time.get_unix_time_from_system())
+			_reno_tick()
+			if offline_reward > 0:
+				offline_ready.emit()
+
+
+## Phone locked / app in the background: the game truly stops (no ticking, no sound).
+## On return the away payout is computed once from the time we were gone.
+var _in_background := false
+var _reno_t := 0.0
+var _skew := 0.0
+
+
+## Unix time that also follows Engine.time_scale (only differs from the wall clock in sped-up tests).
+func now() -> int:
+	return int(Time.get_unix_time_from_system() + _skew)
 
 
 # ---------------------------------------------------------------- chapters / empire
@@ -130,18 +194,32 @@ func chapter_cfg(k: int) -> Dictionary:
 			"requires": spc.requires, "desc": spc.desc})
 		c.builds[gi + 1].requires = c.builds[gi + 1].requires + ["special"]
 	c.log_sell_price = int(round(float(c.log_sell_price) * m))
+	for key in ch.get("crowd", {}):
+		c.customers[key] = ch.crowd[key]
+	if not c.customers.has("order_bonus"):
+		c.customers["order_bonus"] = 0
+	for key in c.stations:
+		if c.stations[key] is Dictionary and c.stations[key].has("c0"):
+			c.stations[key].c0 = float(c.stations[key].c0) * m
 	c.gate.coins = int(round(float(c.gate.coins) * m))
 	c.gate.served = int(c.gate.served) + 40 * k
 	return c
 
 
-const VENUE_KEYS := ["built", "pad_paid", "crew", "woodpile", "rack", "counter_coins", "rating_hist", "vserved", "chapter_done", "sp"]
+const VENUE_KEYS := ["built", "pad_paid", "crew", "woodpile", "rack", "counter_coins", "rating_hist", "vserved", "chapter_done", "sp",
+	"reno", "bigday", "seen", "task_i", "task_base", "golden_n", "walkouts"]
+## Per-venue station levels (kitchen = "fire"). Tools, backpack and boots belong to the player.
+const STATIONS := ["fire", "menu", "dining", "sign", "station"]
+const STATION_CFG := {"fire": "kitchen", "menu": "menu", "dining": "dining", "sign": "sign", "station": "station"}
 
 
 func _snapshot() -> Dictionary:
 	return {"built": built.duplicate(true), "pad_paid": pad_paid.duplicate(true), "crew": crew.duplicate(true),
 		"woodpile": woodpile, "rack": rack, "counter_coins": counter_coins, "rating_hist": rating_hist.duplicate(),
-		"vserved": vserved, "chapter_done": chapter_done, "fire": levels.fire, "menu": levels.menu, "sp": sp.duplicate(true)}
+		"vserved": vserved, "chapter_done": chapter_done, "fire": levels.fire, "menu": levels.menu,
+		"dining": levels.dining, "sign": levels.sign, "station": levels.station, "sp": sp.duplicate(true),
+		"reno": reno.duplicate(), "bigday": bigday.duplicate(), "seen": seen.duplicate(), "task_i": task_i,
+		"task_base": task_base, "golden_n": golden_n, "walkouts": walkouts}
 
 
 func _stash() -> void:
@@ -165,9 +243,18 @@ func _unstash(k: int) -> void:
 	rating_hist = d.get("rating_hist", []).duplicate()
 	vserved = int(d.get("vserved", 0))
 	chapter_done = bool(d.get("chapter_done", false))
-	levels.fire = int(d.get("fire", 0))
-	levels.menu = int(d.get("menu", 0))
+	for key in STATIONS:
+		levels[key] = int(d.get(key, 0))
 	sp = d.get("sp", {}).duplicate(true)
+	reno = d.get("reno", {}).duplicate()
+	bigday = d.get("bigday", {}).duplicate()
+	if chapter_done and not bigday.get("won", false):
+		bigday["won"] = true          # finished before Big Days existed
+	seen = d.get("seen", {}).duplicate()
+	task_i = int(d.get("task_i", 0))
+	task_base = int(d.get("task_base", 0))
+	golden_n = int(d.get("golden_n", 0))
+	walkouts = int(d.get("walkouts", 0))
 
 
 ## Switch the active venue. The scene must be rebuilt afterwards (main.gd does it).
@@ -219,18 +306,23 @@ func venue_rate(k: int) -> float:
 	if k >= venues.size() or venues[k].is_empty():
 		return 0.0
 	var d: Dictionary = venues[k]
-	var cc := chapter_cfg(k)
+	var cc := _cc(k)
 	var cr: Dictionary = d.get("crew", {})
 	var b: Dictionary = d.get("built", {})
-	return _rate(int(cr.get("lumberjack", 0)), int(cr.get("waiter", 0)), int(cr.get("cook", 0)), b,
-		int(d.get("fire", 0)), int(d.get("menu", 0)), cc) * _special_mult(k, b)
+	var lv := {}
+	for key in STATIONS:
+		lv[key] = int(d.get(key, 0))
+	return _rate(int(cr.get("lumberjack", 0)), int(cr.get("waiter", 0)), int(cr.get("cook", 0)), b, lv, cc) \
+		* _special_mult(k, b, lv.station) * star_mult(k)
 
 
-## Crew income bonus once the chapter's signature station is built.
-func _special_mult(k: int, b: Dictionary) -> float:
+## Crew income bonus once the chapter's signature station is built (grows with its level).
+func _special_mult(k: int, b: Dictionary, st_lv := -1) -> float:
 	if not b.has("special"):
 		return 1.0
-	return 1.0 + float(special_def(k).get("bonus", 0.0))
+	if st_lv < 0:
+		st_lv = levels.station
+	return 1.0 + float(special_def(k).get("bonus", 0.0)) * (1.0 + 0.06 * st_lv)
 
 
 ## Background income from every venue except the active one (coins/s, after efficiency).
@@ -278,10 +370,12 @@ func start_new_empire() -> void:
 	venue = 0
 	unlocked = 1
 	coins = 0
-	levels = {"tool": 0, "bag": 0, "boots": 0, "fire": 0, "menu": 0}
+	levels = {"tool": 0, "bag": 0, "boots": 0, "fire": 0, "menu": 0, "dining": 0, "sign": 0, "station": 0}
 	_unstash(0)
+	_cc_cache.clear()
 	cfg = chapter_cfg(0)
 	_rates.clear()
+	refresh_stars()
 	save_game()
 
 
@@ -318,15 +412,323 @@ func speed_mult() -> float:
 
 
 func cook_time() -> float:
-	return float(cfg.fire[levels.fire].cook) / (1.0 + 0.3 * crew.cook)
+	return kitchen_cook(cfg, levels.fire) / (1.0 + 0.3 * crew.cook)
+
+
+## Station formulas (shared by the live venue and background-rate estimates).
+static func kitchen_cook(cc: Dictionary, lv: int) -> float:
+	return float(cc.fire[0].cook) * pow(0.95, lv)
+
+
+static func menu_price(cc: Dictionary, lv: int) -> float:
+	return float(cc.menu[0].price) * (1.0 + 0.12 * lv) * pow(1.25, lv / 5)
 
 
 func dish_price() -> int:
-	return int(round(float(cfg.menu[levels.menu].price) * income_mult()))
+	return int(round(menu_price(cfg, levels.menu) * income_mult() * star_mult(venue)))
 
 
+## Recipe names step up as the menu grows (levels 7, 13, 19).
 func dish_name() -> String:
-	return cfg.menu[levels.menu].name
+	var i := 0
+	for th in [7, 13, 19]:
+		if levels.menu >= th:
+			i += 1
+	return cfg.menu[mini(i, cfg.menu.size() - 1)].name
+
+
+func dining_patience() -> float:
+	return 1.0 + 0.02 * levels.dining
+
+
+func seated_tip() -> float:
+	return float(cfg.customers.seated_tip) + 0.01 * levels.dining
+
+
+func sign_demand() -> float:
+	return 1.0 + 0.04 * levels.sign
+
+
+# ---------------------------------------------------------------- station levels + renovations
+
+## Task data names stations by their config id ("kitchen"); levels use "fire".
+func station_key(id: String) -> String:
+	var k = STATION_CFG.find_key(id)
+	return String(k) if k != null else id
+
+
+func station_def(key: String) -> Dictionary:
+	return cfg.stations[STATION_CFG[key]]
+
+
+func station_max() -> int:
+	return int(cfg.stations.max)
+
+
+## Real seconds a milestone level takes to build (0 for instant levels).
+func reno_seconds(to_lv: int) -> int:
+	return int(cfg.stations.milestones.get(str(to_lv), 0))
+
+
+func station_cost(key: String) -> int:
+	var d := station_def(key)
+	return int(round(float(d.c0) * pow(float(d.g), levels[key])))
+
+
+func station_locked(key: String) -> String:
+	if key == "station" and not built.has("special"):
+		return "Build the " + String(special_def().get("name", "station")).to_lower() + " first" if special_type() != "" else "No signature station here"
+	if not built.has("campfire"):
+		return "Build the " + String(build_def("campfire").name).to_lower() + " first"
+	if levels[key] >= station_max() - 1:
+		return "MAX"
+	if not reno.is_empty():
+		return "Renovating" if reno.id == key else "Builders busy"
+	return ""
+
+
+## Buys the next level. Milestone levels start a timed renovation instead of applying at once.
+func station_upgrade(key: String) -> bool:
+	if station_locked(key) != "":
+		return false
+	var to := int(levels[key]) + 1          # stored index; the level shown to players is index + 1
+	if not spend(station_cost(key)):
+		return false
+	var secs := reno_seconds(to + 1)
+	if secs > 0:
+		reno = {"id": key, "end": now() + secs, "to": to}
+		fire_story("renovation")
+	else:
+		levels[key] = to
+	job_progress("upgrade")
+	state_changed.emit()
+	task_changed.emit()
+	save_game()
+	return true
+
+
+func reno_left() -> int:
+	if reno.is_empty():
+		return 0
+	return maxi(0, int(reno.end) - now())
+
+
+## Cash to finish a renovation right now (shrinks as it nears completion).
+func reno_rush_cost() -> int:
+	if reno.is_empty():
+		return 0
+	return maxi(1, int(round(float(station_cost(reno.id)) * 0.6 * float(reno_left()) / maxf(1.0, float(reno_seconds(int(reno.to) + 1))))))
+
+
+func reno_rush() -> bool:
+	if reno.is_empty() or not spend(reno_rush_cost()):
+		return false
+	reno.end = 0
+	_reno_tick()
+	return true
+
+
+func _reno_tick() -> void:
+	if reno.is_empty() or reno_left() > 0:
+		return
+	var key: String = reno.id
+	levels[key] = int(reno.to)
+	reno = {}
+	toast.emit("%s reached level %d!" % [String(station_def(key).name), levels[key] + 1])
+	state_changed.emit()
+	task_changed.emit()
+	save_game()
+
+
+# ---------------------------------------------------------------- stars (per venue)
+
+## ★1 Big Day won · ★2 4.5★ held after serving twice the gate's guests · ★3 every station 15+ and a clean Big Day.
+func stars(k := -1) -> Array:
+	if k < 0 or k == venue:
+		return _stars_of(bigday, levels, vserved, rating(), cfg)
+	if k >= venues.size() or venues[k].is_empty():
+		return [false, false, false]
+	var d: Dictionary = venues[k]
+	var lv := {}
+	for key in STATIONS:
+		lv[key] = int(d.get(key, 0))
+	var rh: Array = d.get("rating_hist", [])
+	var r := 4.5
+	if not rh.is_empty():
+		r = 0.0
+		for x in rh:
+			r += float(x)
+		r /= rh.size()
+	return _stars_of(d.get("bigday", {}), lv, int(d.get("vserved", 0)), r, _cc(k), special_type(k) != "")
+
+
+func _stars_of(bd: Dictionary, lv: Dictionary, served_n: int, r: float, cc: Dictionary, has_special := special_type() != "") -> Array:
+	var s1: bool = bd.get("won", false)
+	var s2: bool = bd.get("star2", false) or (s1 and served_n >= int(cc.gate.served) * 2 and r >= 4.5)
+	var all15 := true
+	for key in STATIONS:
+		if key == "station" and not has_special:
+			continue
+		if int(lv.get(key, 0)) < 14:          # level 15 shown = index 14
+			all15 = false
+	var s3: bool = s1 and bd.get("clean", false) and all15
+	return [s1, s2, s3]
+
+
+func star_count(k := -1) -> int:
+	return stars(k).count(true)
+
+
+func total_stars() -> int:
+	var n := 0
+	for k in unlocked:
+		n += star_count(k)
+	return n
+
+
+## Every star anywhere: +4% income everywhere.
+func star_mult(_k := -1) -> float:
+	return 1.0 + 0.04 * _star_cache
+
+
+var _star_cache := 0
+
+
+func refresh_stars() -> void:
+	if bigday.get("won", false) and not bigday.get("star2", false) and vserved >= int(cfg.gate.served) * 2 and rating() >= 4.5:
+		bigday["star2"] = true
+		toast.emit("★ New star: 4.5★ rating held!")
+	var n := 0
+	for k in unlocked:
+		n += star_count(k)
+	_star_cache = n
+
+
+# ---------------------------------------------------------------- Big Day
+
+func big_day_def() -> Dictionary:
+	return chapter().get("big_day", {})
+
+
+## The Big Day opens once the venue is fully built (the gate's build checklist).
+func big_day_ready() -> bool:
+	return gate_status().built and not bigday.get("won", false)
+
+
+## After a win with walkouts the Big Day can be replayed for the clean-run third star.
+func big_day_replayable() -> bool:
+	return gate_status().built and not bigday.get("clean", false)
+
+
+func big_day_result(won: bool, clean: bool) -> void:
+	bigday["tries"] = int(bigday.get("tries", 0)) + 1
+	if won:
+		var first: bool = not bigday.get("won", false)
+		bigday["won"] = true
+		if clean:
+			bigday["clean"] = true
+		if first:
+			fire_story("bigday_win")
+	else:
+		fire_story("bigday_fail", true)
+	refresh_stars()
+	state_changed.emit()
+	task_changed.emit()
+	save_game()
+
+
+# ---------------------------------------------------------------- story cards
+
+## Queues the beats for `on` (chapter + common) that haven't been shown at this venue.
+func fire_story(on: String, repeat := false) -> void:
+	if story_data.is_empty():
+		return
+	var out: Array = []
+	var ch: Dictionary = story_data.chapters.get(String(chapter().id), {})
+	var i := 0
+	for b in ch.get("beats", []) + story_data.common:
+		i += 1
+		if b.on != on:
+			continue
+		var key := "%s:%d" % [on, i]
+		if seen.has(key) and not repeat:
+			continue
+		seen[key] = true
+		out.append(b)
+	if not out.is_empty():
+		story.emit(out)
+
+
+func character(id: String) -> Dictionary:
+	return story_data.characters.get(id, {"name": id, "role": ""})
+
+
+# ---------------------------------------------------------------- chapter task chain
+
+func tasks() -> Array:
+	if story_data.is_empty():
+		return []
+	return story_data.chapters.get(String(chapter().id), {}).get("tasks", [])
+
+
+func current_task() -> Dictionary:
+	var ts := tasks()
+	return ts[task_i] if task_i < ts.size() else {}
+
+
+func task_text(t: Dictionary) -> String:
+	match String(t.t):
+		"build": return "Build: " + String(build_def(t.id).get("name", t.id))
+		"serve": return "Serve %d %s" % [int(t.n), String(chapter().guests)]
+		"hire": return "Hire a " + String(cfg.crew[t.id].name).to_lower()
+		"level": return "%s to level %d" % [String(station_def(station_key(t.id)).name), int(t.n)]
+		"golden": return "Chop a golden tree"
+		"bigday": return "Win the Big Day: " + String(big_day_def().get("name", ""))
+	return ""
+
+
+## [progress, goal]
+func task_progress(t: Dictionary) -> Array:
+	match String(t.t):
+		"build": return [1 if built.has(t.id) else 0, 1]
+		"serve": return [mini(vserved - task_base, int(t.n)), int(t.n)]
+		"hire": return [mini(int(crew.get(t.id, 0)), 1), 1]
+		"level": return [mini(int(levels[station_key(t.id)]) + 1, int(t.n)), int(t.n)]
+		"golden": return [mini(golden_n - task_base, 1), 1]
+		"bigday": return [1 if bigday.get("won", false) else 0, 1]
+	return [0, 1]
+
+
+func task_done() -> bool:
+	var t := current_task()
+	if t.is_empty():
+		return false
+	var p := task_progress(t)
+	return p[0] >= p[1]
+
+
+func task_reward(t: Dictionary) -> int:
+	return int(float(t.get("r", 1)) * float(menu_price(cfg, 0)) * 2.0 * income_mult())
+
+
+func claim_task() -> void:
+	if not task_done():
+		return
+	add_coins(task_reward(current_task()), false)
+	task_i += 1
+	_task_start()
+	task_changed.emit()
+	save_game()
+
+
+func _task_start() -> void:
+	var t := current_task()
+	if t.is_empty():
+		return
+	seen["task_init"] = true
+	match String(t.t):
+		"serve": task_base = vserved
+		"golden": task_base = golden_n
 
 
 func fires() -> int:
@@ -384,7 +786,11 @@ func hire(role: String) -> bool:
 	if cost < 0 or not spend(cost):
 		return false
 	crew[role] += 1
+	if crew.values().reduce(func(a, b): return a + b, 0) == 1 or not seen.has("hired_any"):
+		seen["hired_any"] = true
+		fire_story("hired")
 	state_changed.emit()
+	task_changed.emit()
 	save_game()
 	return true
 
@@ -423,7 +829,11 @@ func pay_pad(id: String, amount: int) -> int:
 func complete_build(id: String) -> void:
 	built[id] = true
 	pad_paid.erase(id)
+	fire_story("built:" + id)
+	if big_day_ready():
+		fire_story("bigday_ready")
 	state_changed.emit()
+	task_changed.emit()
 	save_game()
 
 
@@ -433,12 +843,13 @@ func gate_status() -> Dictionary:
 		"coins": coins >= int(g.coins), "rating": rating() >= float(g.rating),
 		"served": vserved >= int(g.served),
 		"built": built.has("tables_2") and built.has("crew_hut") and (special_type() == "" or built.has("special")),
+		"bigday": bigday.get("won", false),
 	}
 
 
 func gate_ready() -> bool:
 	var s := gate_status()
-	return s.coins and s.rating and s.served and s.built
+	return s.coins and s.rating and s.served and s.built and s.bigday
 
 
 func open_next_venue() -> void:
@@ -456,10 +867,12 @@ func open_next_venue() -> void:
 
 ## Sustained coins per second the crew can make without the player (min of the chain).
 func passive_rate() -> float:
-	return _rate(crew.lumberjack, crew.waiter, crew.cook, built, levels.fire, levels.menu, cfg) * _special_mult(venue, built)
+	return _rate(crew.lumberjack, crew.waiter, crew.cook, built, levels, cfg) * _special_mult(venue, built) * star_mult()
 
 
-func _rate(lj: int, waiters: int, cooks: int, b: Dictionary, fire_lv: int, menu_lv: int, cc: Dictionary) -> float:
+func _rate(lj: int, waiters: int, cooks: int, b: Dictionary, lv: Dictionary, cc: Dictionary) -> float:
+	var fire_lv := int(lv.get("fire", 0))
+	var menu_lv := int(lv.get("menu", 0))
 	if lj == 0 or not b.has("campfire"):
 		return 0.0
 	var w: Dictionary = cc.worker
@@ -467,20 +880,20 @@ func _rate(lj: int, waiters: int, cooks: int, b: Dictionary, fire_lv: int, menu_
 	var cycle := float(w.carry) * float(w.chop_interval) + 18.0 / float(w.speed) + 1.5
 	var logs_s: float = lj * float(w.carry) / cycle
 	var nf := (1 if b.has("campfire") else 0) + (1 if b.has("fire_2") else 0)
-	var cook_s: float = nf / (float(cc.fire[fire_lv].cook) / (1.0 + 0.3 * cooks))
+	var cook_s: float = nf / (kitchen_cook(cc, fire_lv) / (1.0 + 0.3 * cooks))
 	var serve_s: float
 	if waiters > 0:
-		serve_s = waiters * float(w.carry) / (14.0 / float(w.speed) + 2.0)
+		serve_s = waiters * float(w.get("waiter_carry", w.carry)) / (14.0 / float(w.speed) + 2.0)
 	else:
 		serve_s = 0.0
 	var c: Dictionary = cc.customers
 	var nt := (2 if b.has("tables_1") else 0) + (2 if b.has("tables_2") else 0)
-	var demand_s: float = (1.0 + nt * float(c.per_table_bonus) + (nf - 1) * 0.3 + fire_lv * 0.14 + menu_lv * 0.1 + cooks * 0.12) / float(c.interval)
+	var demand_s: float = (1.0 + nt * float(c.per_table_bonus) + (nf - 1) * 0.2 + fire_lv * 0.04 + menu_lv * 0.03 + cooks * 0.12) 		* (1.0 + 0.04 * int(lv.get("sign", 0))) / float(c.interval)
 	var dishes_s: float = min(logs_s * float(cc.dishes_per_log), cook_s, serve_s, demand_s)
 	if dishes_s <= 0.0:
 		# no waiter: logs still sell at the truck via lumberjacks? No: they only feed the pile.
 		return 0.0
-	return dishes_s * float(cc.menu[menu_lv].price) * income_mult()
+	return dishes_s * menu_price(cc, menu_lv) * income_mult()
 
 
 # ---------------------------------------------------------------- daily jobs
@@ -577,7 +990,7 @@ func to_dict() -> Dictionary:
 		"counter_coins": counter_coins, "jobs_day": jobs_day, "jobs": jobs, "streak": streak,
 		"streak_last_day": streak_last_day, "chest_claimed": chest_claimed, "mute": mute, "quality": quality, "quality_auto": quality_auto,
 		"sp": sp, "venue": venue, "unlocked": unlocked, "venues": _venues_for_save(), "vserved": vserved, "prestige": prestige,
-		"t": int(Time.get_unix_time_from_system()),
+		"t": int(Time.get_unix_time_from_system()), "lv2": true, "settings": settings, "profile": profile, "offline_reward": offline_reward,
 	}
 
 
@@ -649,8 +1062,39 @@ func load_game() -> void:
 	sp = d.get("sp", {})
 	# saves from before the empire update: an opened gate unlocks chapter 2
 	unlocked = int(d.get("unlocked", 2 if chapter_done else 1))
+	for k in d.get("settings", {}):
+		settings[k] = d.settings[k]
+	var pr: Dictionary = d.get("profile", {})
+	if pr.has("owned") and pr.has("equipped"):
+		profile = pr
+	# saves from before station levels: old 4-step kitchen/menu map onto the 25-level scale
+	if not d.get("lv2", false):
+		levels.fire = [0, 4, 9, 14][clampi(int(levels.fire), 0, 3)]
+		levels.menu = [0, 2, 4, 6][clampi(int(levels.menu), 0, 3)]
+		for vd in venues:
+			if vd is Dictionary and not vd.is_empty():
+				vd["fire"] = [0, 4, 9, 14][clampi(int(vd.get("fire", 0)), 0, 3)]
+				vd["menu"] = [0, 2, 4, 6][clampi(int(vd.get("menu", 0)), 0, 3)]
+	# per-venue long-term state lives in the venue snapshot
+	if venue < venues.size() and venues[venue] is Dictionary and not venues[venue].is_empty():
+		var vd2: Dictionary = venues[venue]
+		vd2["fire"] = levels.fire
+		vd2["menu"] = levels.menu
+		_unstash(venue)
 	if chapter_done:
 		built["gate"] = true
+		bigday["won"] = true
+	for vd3 in venues:
+		if vd3 is Dictionary and vd3.get("chapter_done", false):
+			var b3: Dictionary = vd3.get("bigday", {})
+			b3["won"] = true
+			vd3["bigday"] = b3
+	for key in STATIONS:
+		levels[key] = clampi(int(levels[key]), 0, station_max() - 1)
+	offline_reward = int(d.get("offline_reward", 0))
+	_cc_cache.clear()
+	cfg = chapter_cfg(venue)
+	refresh_stars()
 	_compute_offline(int(d.t))
 
 
@@ -660,7 +1104,8 @@ func _compute_offline(t_saved: int) -> void:
 	var o: Dictionary = cfg.offline
 	if away < int(o.min_away_s):        # also guards clock rollback (negative)
 		return
-	var capped: int = mini(away, int(float(o.cap_hours) * 3600.0))
+	var cap_h := minf(float(o.cap_max_h), float(o.cap_hours) + float(o.cap_per_venue_h) * (unlocked - 1))
+	var capped: int = mini(away, int(cap_h * 3600.0))
 	cfg = chapter_cfg(venue)
 	var rate := passive_rate()
 	for k in unlocked:
@@ -669,7 +1114,12 @@ func _compute_offline(t_saved: int) -> void:
 	if rate <= 0.0:
 		return
 	offline_seconds = capped
-	offline_reward = int(rate * capped * float(o.efficiency))
+	offline_reward += int(rate * capped * float(o.efficiency))
+
+
+func offline_cap_hours() -> float:
+	var o: Dictionary = cfg.offline
+	return minf(float(o.cap_max_h), float(o.cap_hours) + float(o.cap_per_venue_h) * (unlocked - 1))
 
 
 func claim_offline() -> void:
@@ -683,9 +1133,10 @@ func reset_all() -> void:
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(BACKUP_PATH))
 	get_tree().reload_current_scene.call_deferred()
 	coins = 0; served = 0; built = {}; pad_paid = {}
-	levels = {"tool": 0, "bag": 0, "boots": 0, "fire": 0, "menu": 0}
 	crew = {"lumberjack": 0, "waiter": 0, "cook": 0}
 	rating_hist = []; chapter_done = false; ftue = 0; woodpile = 0; rack = 0; counter_coins = 0; sp = {}
 	venue = 0; unlocked = 1; venues = []; vserved = 0; prestige = 0; cfg = chapter_cfg(0)
-	stats = {"trees": 0, "logs": 0, "served": 0, "earned": 0, "sold": 0, "play_s": 0.0}
+	stats = {"trees": 0, "logs": 0, "served": 0, "earned": 0, "sold": 0, "play_s": 0.0, "lost": 0, "walkouts": 0, "golden": 0, "bigdays": 0}
+	reno = {}; bigday = {}; seen = {}; task_i = 0; task_base = 0; golden_n = 0; walkouts = 0; _star_cache = 0
+	levels = {"tool": 0, "bag": 0, "boots": 0, "fire": 0, "menu": 0, "dining": 0, "sign": 0, "station": 0}
 	jobs_day = ""; refresh_jobs()

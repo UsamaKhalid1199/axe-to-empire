@@ -342,7 +342,7 @@ func _hit(t: Dictionary) -> void:
 			back.receive(tr.global_position + Vector3(0, 1.0 + i * 0.2, 0), 0.3 + i * 0.05)
 	if not bool(t.move_chop):
 		Sfx.play("chop", -2.0)
-		if OS.has_feature("mobile"):
+		if OS.has_feature("mobile") and Game.settings.get("vibration", true):
 			Input.vibrate_handheld(18)
 
 

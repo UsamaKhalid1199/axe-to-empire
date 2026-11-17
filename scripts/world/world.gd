@@ -4,6 +4,7 @@ extends Node3D
 signal zone_entered(kind: String, id: String)
 signal zone_exited(kind: String, id: String)
 signal float_text(text: String, world_pos: Vector3, color: Color)
+signal big_day_finished(won: bool, served: int, goal: int)
 
 const SPAWN := Vector3(0, 0, -3.6)
 var LOW_END := OS.has_feature("mobile")
@@ -64,6 +65,25 @@ var _obj_t := 0.0
 var cam_off := Vector3(0, 10.5, 8.2)
 var theme: Dictionary = {}
 var specials: Specials
+# crowds
+var group_t := 150.0
+var group_left := 0
+var group_gap := 0.0
+var passers := 0
+# golden tree
+var golden: ChopTree
+var golden_left := 0.0
+var golden_t := 90.0
+var _gold_mat: Material
+var _gold_fx: Node3D
+# Big Day
+var bd_active := false
+var bd_left := 0.0
+var bd_served := 0
+var bd_walkouts := 0
+var bd_scores: Array = []
+var bd: Dictionary = {}
+var _bd_cool := 0.0
 
 
 func _tc(key: String, def: Color) -> Color:
@@ -123,6 +143,10 @@ func _finish_build() -> void:
 	specials = Specials.new().setup(self)
 	add_child(specials)
 	_rebuild_all(false)
+	Game.fire_story("start")
+	if Game.task_i == 0 and not Game.seen.has("task_init"):
+		Game._task_start()
+	golden_t = randf_range(60.0, 100.0)
 	if Game.head_start_note:
 		Game.head_start_note = false
 		Game.toast.emit("Your crew set up the " + String(Game.build_def("campfire").name).to_lower())
@@ -981,7 +1005,7 @@ func reserve_tree(by: Node, p: Vector3) -> ChopTree:
 	var best: ChopTree = null
 	var bd := INF
 	for t in trees:
-		if not t.alive or (t.reserved_by != null and is_instance_valid(t.reserved_by)):
+		if not t.alive or (t.reserved_by != null and is_instance_valid(t.reserved_by)) or t == golden:
 			continue
 		if player.global_position.distance_to(t.global_position) < 2.5:
 			continue
@@ -1021,7 +1045,7 @@ func sell_log_from(s: Stack, by: Node3D) -> bool:
 	if by == player:
 		Game.job_progress("sell")
 	Sfx.play("coin", -8.0 if by == player else -14.0, 1.0, 0.05)
-	float_text.emit("+%d" % price, by.global_position + Vector3(randf_range(-0.3, 0.3), 2.3, 0), UI.GOLD_LIGHT)
+	float_text.emit("+$%d" % price, by.global_position + Vector3(randf_range(-0.3, 0.3), 2.3, 0), UI.CASH)
 	return true
 
 
@@ -1066,7 +1090,8 @@ func _coin_visuals(amount: int) -> int:
 	return mini(54, int(ceil(amount / 5.0)))
 
 
-func customer_paid(c: Node3D, amount: int, score: float) -> void:
+func customer_paid(c: Node3D, amount: int, score: float, bonus := "") -> void:
+	_bd_count(1, score)
 	Game.counter_coins += amount
 	Game.served += 1
 	Game.vserved += 1
@@ -1078,7 +1103,10 @@ func customer_paid(c: Node3D, amount: int, score: float) -> void:
 	while coin_stack.count() < want:
 		coin_stack.receive(from, 0.35 + coin_stack.count() % 5 * 0.04)
 	Sfx.play("cash", -4.0)
-	float_text.emit("+%d" % amount, c.global_position + Vector3(0, 2.4, 0), UI.GOLD_LIGHT)
+	float_text.emit("+" + UI.cash(amount), c.global_position + Vector3(0, 2.4, 0), UI.CASH)
+	if bonus != "":
+		float_text.emit(bonus, c.global_position + Vector3(0, 3.0, 0), UI.GOLD_LIGHT)
+	Game.refresh_stars()
 
 
 ## Price multiplier for guests paying right now (warm fireplace, fair rush).
@@ -1087,11 +1115,15 @@ func price_mult() -> float:
 
 
 func patience_mult() -> float:
-	return specials.patience_mult() if specials else 1.0
+	var m: float = specials.patience_mult() if specials else 1.0
+	if bd_active:
+		m *= float(bd.get("patience_mult", 1.0))
+	return m
 
 
 ## Drive-thru cars and the room-service van pay straight into your coins.
 func card_paid(at: Vector3, amount: int, score: float, guests: int) -> void:
+	_bd_count(guests, score)
 	Game.add_coins(amount)
 	Game.served += guests
 	Game.vserved += guests
@@ -1100,12 +1132,12 @@ func card_paid(at: Vector3, amount: int, score: float, guests: int) -> void:
 		Game.add_rating(score)
 		Game.job_progress("serve")
 	Sfx.play("cash", -4.0)
-	float_text.emit("+%s" % UI.fmt(amount), at + Vector3(0, 2.6, 0), UI.GOLD_LIGHT)
+	float_text.emit("+" + UI.cash(amount), at + Vector3(0, 2.6, 0), UI.CASH)
 
 
 ## Where a waiter should take dishes: the counter, or the drive-thru / van when it needs them.
 func waiter_sink(idx: int) -> String:
-	var need: int = specials.dish_need()
+	var need: int = specials.dish_need() if specials.crew_allowed() else 0
 	if need > 0 and (idx == 1 or counter_count() >= 3 or queue.is_empty()):
 		return "special"
 	return "counter"
@@ -1113,7 +1145,45 @@ func waiter_sink(idx: int) -> String:
 
 func customer_angry(c: Node3D) -> void:
 	Game.add_rating(1.0)
+	Game.walkouts += 1
+	Game.stats.walkouts += 1
+	if bd_active:
+		bd_walkouts += 1
+		bd_scores.append(1.0)
 	float_text.emit("TOO SLOW!", c.global_position + Vector3(0, 2.4, 0), UI.RED)
+	Sfx.play("clack", -6.0, 0.6)
+	# the two guests behind them get grumpier
+	var i := queue.find(c)
+	if i >= 0:
+		for k in [i + 1, i + 2]:
+			if k < queue.size() and is_instance_valid(queue[k]):
+				queue[k].annoy(0.1)
+	Game.fire_story("walkout")
+	_check_rating()
+
+
+func _check_rating() -> void:
+	if Game.rating_hist.size() >= 12 and Game.rating() < 3.5:
+		Game.fire_story("rating_low")
+
+
+## True while the player stands at the counter: guests served then pay the hands-on bonus.
+func player_serving() -> bool:
+	return serve_zone != null and _inside.get(serve_zone, false)
+
+
+func order_bonus() -> int:
+	return int(bd.get("order_bonus", 0)) if bd_active else 0
+
+
+func roll_vip() -> bool:
+	if bd_active and randf() < float(bd.get("vip_share", 0.0)):
+		return true
+	return specials != null and specials.roll_vip()
+
+
+func car_rate() -> float:
+	return float(bd.get("car_mult", 1.0)) if bd_active else 1.0
 
 
 func queue_leave(c: Node) -> void:
@@ -1126,8 +1196,12 @@ func _reslot() -> void:
 		queue[i].move_to_slot(i, _slot_pos(i))
 
 
+## The line snakes: six guests down from the counter, then six back up beside them.
 func _slot_pos(i: int) -> Vector3:
-	return COUNTER_POS + Vector3(-0.2, 0, 0.95 + i * 0.95)
+	var k := i % 6
+	if i < 6:
+		return COUNTER_POS + Vector3(-0.2, 0, 0.95 + k * 0.92)
+	return COUNTER_POS + Vector3(0.95, 0, 0.95 + (5 - k) * 0.92)
 
 
 func take_seat(c: Node) -> int:
@@ -1168,13 +1242,13 @@ func seat_done(i: int, paid: int) -> void:
 	var plate: Stack = seats[i].plate
 	plate.set_count(0)
 	seats[i].by = null
-	var tip := int(round(paid * float(Game.cfg.customers.seated_tip)))
+	var tip := int(round(paid * Game.seated_tip()))
 	if tip > 0:
 		Game.counter_coins += tip
 		var want := _coin_visuals(Game.counter_coins)
 		while coin_stack.count() < want:
 			coin_stack.receive(seats[i].pos + Vector3(0, 1, 0), 0.5)
-		float_text.emit("TIP +%d" % tip, seats[i].pos + Vector3(0, 2.2, 0), UI.GREEN)
+		float_text.emit("TIP +" + UI.cash(tip), seats[i].pos + Vector3(0, 2.2, 0), UI.CASH)
 		Game.add_rating(5.0)
 
 
@@ -1191,6 +1265,8 @@ func path_home(from: Vector3) -> Array:
 
 func on_tree_hit(t: ChopTree, logs: int, by: Node) -> void:
 	fx_chips(t.global_position + Vector3(0, 0.8, 0))
+	if not t.alive and t == golden:
+		_golden_felled(by == player)
 	if not t.alive:
 		Game.stats.trees += 1
 		if by == player:
@@ -1209,6 +1285,8 @@ func _process(delta: float) -> void:
 	_zones_tick(delta)
 	_fires_tick(delta)
 	_customers_tick(delta)
+	_golden_tick(delta)
+	_bd_tick(delta)
 	specials.tick(delta)
 	_cam_tick(delta)
 	_obj_t -= delta
@@ -1333,12 +1411,35 @@ func _customers_tick(delta: float) -> void:
 	var c: Dictionary = Game.cfg.customers
 	spawn_t -= delta
 	var max_q := max_queue()
-	var limit := max_q + seats.size() + 2
+	var limit := max_q + seats.size() + 4
 	if spawn_t <= 0.0:
 		spawn_t = spawn_interval() * randf_range(0.75, 1.25)
-		if queue.size() < max_q and customers.size() < limit:
-			_spawn_customer()
+		_arrive(max_q, limit)
+	# groups: a bunch of guests arrive together every couple of minutes once there are tables
+	if Game.built.has("tables_1") and not bd_active:
+		group_t -= delta
+		if group_t <= 0.0:
+			var gr: Array = c.group_every
+			group_t = randf_range(float(gr[0]), float(gr[1]))
+			var gs: Array = c.group_size
+			group_left = randi_range(int(gs[0]), int(gs[1])) + Game.venue / 2
+			Game.toast.emit(String(Game.chapter().get("group", "A group of guests is coming!")))
+			Game.fire_story("group")
+	if group_left > 0:
+		group_gap -= delta
+		if group_gap <= 0.0:
+			group_gap = 0.55
+			group_left -= 1
+			_arrive(max_q, limit)
 	customers = customers.filter(func(x): return is_instance_valid(x))
+
+
+## One guest shows up: joins the line, or walks past if it's full (a lost sale).
+func _arrive(max_q: int, limit: int) -> void:
+	if queue.size() < max_q and customers.size() < limit:
+		_spawn_customer()
+	elif passers < 3:
+		_spawn_passer()
 
 
 ## Demand grows with the whole business: tables, fires, kitchen upgrades, cooks and menu.
@@ -1346,17 +1447,22 @@ func _customers_tick(delta: float) -> void:
 func spawn_interval() -> float:
 	var c: Dictionary = Game.cfg.customers
 	var demand := 1.0 + Game.tables() * float(c.per_table_bonus)
-	demand += (fires.size() - 1) * 0.30
+	demand += (fires.size() - 1) * 0.20
 	demand += int(Game.levels.get("fire", 0)) * 0.14
 	demand += int(Game.levels.get("menu", 0)) * 0.10
 	demand += int(Game.crew.get("cook", 0)) * 0.12
-	var rate_mult := lerpf(1.3, 0.85, clampf((Game.rating() - 3.0) / 2.0, 0.0, 1.0))
+	demand *= Game.sign_demand()
+	var rate_mult := lerpf(1.35, 0.85, clampf((Game.rating() - 3.0) / 2.0, 0.0, 1.0))
+	if bd_active:
+		return float(bd.get("interval", 1.0)) / Game.sign_demand()
 	return float(c.interval) / demand * rate_mult * (specials.spawn_mult() if specials else 1.0)
 
 
 ## A second fire and kitchen upgrades let a longer line form at the counter.
 func max_queue() -> int:
-	return int(Game.cfg.customers.max_queue) + (fires.size() - 1) + int(int(Game.levels.get("fire", 0)) >= 2) + (specials.extra_queue() if specials else 0)
+	var q := int(Game.cfg.customers.max_queue) + (fires.size() - 1) + int(Game.levels.get("dining", 0)) / 8 \
+		+ (specials.extra_queue() if specials else 0) + (3 if bd_active else 0)
+	return mini(q, int(Game.cfg.customers.queue_cap))
 
 
 func _spawn_customer() -> void:
@@ -1367,8 +1473,26 @@ func _spawn_customer() -> void:
 	var i := queue.size()
 	queue.append(cu)
 	cu.slot = i
-	cu.go([Vector3(COUNTER_POS.x + 1.6, 0, ROAD_Z - 0.4), _slot_pos(i)])
+	var sp := _slot_pos(i)
+	cu.go([Vector3(COUNTER_POS.x + 2.2, 0, ROAD_Z - 0.4), sp])
 	customers.append(cu)
+
+
+func _spawn_passer() -> void:
+	cust_seed += 1
+	passers += 1
+	Game.stats.lost += 1
+	var cu := Customer.new().setup_passer(self, cust_seed + randi() % 1000)
+	add_child(cu)
+	cu.global_position = ROAD_EAST + Vector3(0, 0, randf_range(0.0, 0.5))
+	cu.go([Vector3(COUNTER_POS.x + 2.5, 0, ROAD_Z + 0.2), Vector3(-22, 0, ROAD_Z + 0.3)])
+	cu.tree_exited.connect(func(): passers -= 1)
+	var tw := cu.create_tween()
+	tw.tween_interval(4.5)
+	tw.tween_callback(func():
+		if is_instance_valid(cu):
+			float_text.emit("TOO BUSY!", cu.global_position + Vector3(0, 2.4, 0), Color(1, 1, 1, 0.75)))
+	Game.fire_story("balk")
 
 
 func _place_cam(t: float) -> void:
@@ -1393,10 +1517,10 @@ func _cam_tick(delta: float) -> void:
 		for t in trees:
 			var d: Vector3 = t.global_position - ppos
 			var covers: bool = t.alive and d.z > 0.9 and d.z < 4.8 and absf(d.x) < 1.9 and not chopping.has(t)
-			var want: Material = cut if covers else null
+			var want: Material = cut if covers else (_gold_mat if t == golden and _gold_mat else null)
 			if t.mesh.material_override != want:
 				t.mesh.material_override = want
-			_batch_tree(t, t.alive and not covers and t._shake <= 0.0 and not t.growing)
+			_batch_tree(t, t.alive and not covers and t._shake <= 0.0 and not t.growing and t != golden)
 		for m in [cut]:
 			m.set_shader_parameter("player_screen", sp)
 			m.set_shader_parameter("player_dist", cam.global_position.distance_to(head))
@@ -1455,6 +1579,18 @@ func _compute_objective() -> Dictionary:
 		if p.back.count() >= cap or (p.back.count() > 0 and p.back.count() * int(Game.cfg.log_sell_price) + Game.coins >= cost):
 			return {"text": "Sell logs at the truck", "pos": SELL_POS}
 		return {"text": "Chop trees (stand next to one)", "pos": _nearest_tree_pos()}
+	if bd_active:
+		if p.hands.count() > 0:
+			return {"text": "Serve the crowd!", "pos": serve_zone.global_position}
+		if Game.rack > 0 and (Game.crew.waiter == 0 or Game.rack >= 6):
+			return {"text": "Carry food to the counter!", "pos": rack_zone.global_position}
+		if p.back.count() >= mini(6, cap) or (p.back.count() > 0 and Game.woodpile < 4):
+			return {"text": "Stack logs: the kitchen needs wood!", "pos": pile_zone.global_position}
+		if Game.woodpile < 10:
+			return {"text": "Chop wood: keep the kitchen going!", "pos": _nearest_tree_pos()}
+		return {"text": "Serve the crowd!", "pos": rack_zone.global_position if Game.rack > 0 else serve_zone.global_position}
+	if golden and golden.alive and p.hands.count() == 0 and p.back.count() < cap:
+		return {"text": "Chop the golden tree! %ds" % ceili(golden_left), "pos": golden.global_position}
 	# affordable build pad first
 	for b in Game.cfg.builds:
 		if pads.has(b.id) and b.id != "gate":
@@ -1463,6 +1599,10 @@ func _compute_objective() -> Dictionary:
 				return {"text": "Build: " + String(b.name), "pos": pad_pos(b.id)}
 	if pads.has("gate") and Game.gate_ready():
 		return {"text": "Unlock " + String(Game.build_def("gate").name) + "!", "pos": PADS.gate}
+
+	var bd_ready: bool = pads.has("gate") and Game.big_day_ready() and _bd_cool <= 0.0
+	if bd_ready and Game.woodpile >= 20 and p.hands.count() == 0 and Game.counter_coins < int(20.0 * Game.dish_price()):
+		return {"text": "Ready? Start the Big Day: " + String(Game.big_day_def().get("name", "")), "pos": PADS.gate}
 	var sp_obj: Dictionary = specials.objective(p)
 	if not sp_obj.is_empty():
 		return sp_obj
@@ -1472,19 +1612,25 @@ func _compute_objective() -> Dictionary:
 	if Game.rack > 0 and Game.crew.waiter == 0 and (hungry or Game.rack >= int(Game.cfg.rack_cap)):
 		return {"text": "Carry food to the counter", "pos": rack_zone.global_position}
 	var fires_idle := Game.woodpile == 0 and Game.rack == 0 and not fires.any(func(f): return f.fuel > 0 or f.cooking)
-	if p.back.count() >= cap or (p.back.count() >= mini(4, cap) and Game.woodpile < 3) or (p.back.count() > 0 and fires_idle):
+	var pile_full: bool = Game.woodpile >= int(Game.cfg.woodpile_cap)
+	if (p.back.count() >= cap and not pile_full) or (p.back.count() >= mini(4, cap) and Game.woodpile < 3) or (p.back.count() > 0 and fires_idle):
 		return {"text": "Stack logs by the " + String(Game.build_def("campfire").name).to_lower(), "pos": pile_zone.global_position}
-	if Game.counter_coins >= 40:
-		return {"text": "Collect your coins", "pos": COIN_POS}
+	if Game.counter_coins >= int(4.0 * Game.dish_price()):
+		return {"text": "Collect your cash", "pos": COIN_POS}
 	if Game.woodpile < 4:
 		return {"text": "Chop wood for the " + _cooker_word(), "pos": _nearest_tree_pos()}
+	if bd_ready and Game.woodpile < 20:
+		return {"text": "Big Day prep: fill the woodpile (%d/20)" % Game.woodpile, "pos": _nearest_tree_pos() if p.back.count() < cap else pile_zone.global_position}
 	if Game.counter_coins > 0:
-		return {"text": "Collect your coins", "pos": COIN_POS}
+		return {"text": "Collect your cash", "pos": COIN_POS}
 	if Game.built.has("shop"):
-		for tr in ["tool", "bag", "boots", "fire", "menu"]:
+		for tr in ["tool", "bag", "boots"]:
 			var n := Game.next_upgrade(tr)
 			if not n.is_empty() and Game.coins >= int(n.cost):
 				return {"text": "Upgrade at the " + String(Game.build_def("shop").name).to_lower(), "pos": PADS.shop}
+	for key in Game.STATIONS:
+		if Game.station_locked(key) == "" and Game.coins >= Game.station_cost(key):
+			return {"text": "Tap UPGRADE: level up your " + String(Game.station_def(key).name).to_lower(), "pos": Vector3.ZERO}
 	return {"text": "Keep the " + _cooker_word() + " fed", "pos": Vector3.ZERO}
 
 
@@ -1563,3 +1709,182 @@ func apply_quality() -> void:
 		var mm: MultiMesh = n.multimesh
 		var keep := 0.55 if n.is_in_group("edge_forest") else 0.35
 		mm.visible_instance_count = int(mm.instance_count * keep) if smooth else -1
+
+
+# ------------------------------------------------------------------ golden tree
+
+func _golden_tick(delta: float) -> void:
+	if golden:
+		golden_left -= delta
+		if golden_left <= 0.0 or not golden.alive:
+			_golden_clear()
+		elif _gold_fx:
+			_gold_fx.rotate_y(delta * 2.0)
+		return
+	if not Game.built.has("campfire") or bd_active:
+		return
+	golden_t -= delta
+	if golden_t > 0.0:
+		return
+	var gr: Array = Game.cfg.golden.every
+	golden_t = randf_range(float(gr[0]), float(gr[1]))
+	var pick: Array = []
+	for t in trees:
+		if t.alive and not t.growing and (t.reserved_by == null or not is_instance_valid(t.reserved_by)) \
+				and t.global_position.z > -15.0 and absf(t.global_position.x) < 11.0:
+			pick.append(t)
+	if pick.is_empty():
+		return
+	golden = pick[randi() % pick.size()]
+	golden_left = float(Game.cfg.golden.life)
+	if _gold_mat == null:
+		var m := StandardMaterial3D.new()
+		m.albedo_color = Color(1.0, 0.78, 0.25)
+		m.emission_enabled = true
+		m.emission = Color(1.0, 0.62, 0.12)
+		m.emission_energy_multiplier = 0.9
+		m.roughness = 0.35
+		m.metallic = 0.6
+		_gold_mat = m
+	_batch_tree(golden, false)
+	golden.mesh.material_override = _gold_mat
+	_gold_fx = Node3D.new()
+	golden.add_child(_gold_fx)
+	var sp := CPUParticles3D.new()
+	var qm := QuadMesh.new()
+	qm.size = Vector2(0.18, 0.18)
+	var fm := StandardMaterial3D.new()
+	fm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	fm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	fm.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	fm.billboard_mode = BaseMaterial3D.BILLBOARD_PARTICLES
+	fm.albedo_texture = _soft_dot()
+	fm.albedo_color = Color(1.0, 0.85, 0.3)
+	qm.material = fm
+	sp.mesh = qm
+	sp.amount = 14
+	sp.lifetime = 1.4
+	sp.emission_shape = CPUParticles3D.EMISSION_SHAPE_SPHERE
+	sp.emission_sphere_radius = 1.0
+	sp.position = Vector3(0, 1.6, 0)
+	sp.gravity = Vector3(0, 0.6, 0)
+	sp.initial_velocity_min = 0.1
+	sp.initial_velocity_max = 0.4
+	_gold_fx.add_child(sp)
+	var l := Label3D.new()
+	l.text = "GOLDEN TREE"
+	l.font = UI.font_bold()
+	l.font_size = 64
+	l.pixel_size = 0.005
+	l.outline_size = 14
+	l.outline_modulate = Color(0.25, 0.12, 0.0)
+	l.modulate = UI.GOLD_LIGHT
+	l.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	l.no_depth_test = true
+	l.position = Vector3(0, 3.6, 0)
+	golden.add_child(l)
+	l.name = "GoldLabel"
+	Game.toast.emit("A golden tree appeared!")
+	Game.fire_story("golden")
+	Sfx.play("build", -10.0, 1.4)
+
+
+func _golden_clear() -> void:
+	if is_instance_valid(golden):
+		if golden.mesh.material_override == _gold_mat:
+			golden.mesh.material_override = null
+		var l := golden.get_node_or_null("GoldLabel")
+		if l:
+			l.queue_free()
+	if is_instance_valid(_gold_fx):
+		_gold_fx.queue_free()
+	_gold_fx = null
+	golden = null
+
+
+func _golden_felled(by_player: bool) -> void:
+	var pos := golden.global_position
+	_golden_clear()
+	if not by_player:
+		return
+	var reward := int(round(float(Game.cfg.golden.reward_dishes) * Game.dish_price()))
+	Game.add_coins(reward)
+	Game.golden_n += 1
+	Game.stats.golden += 1
+	Game.task_changed.emit()
+	float_text.emit("GOLDEN! +" + UI.cash(reward), pos + Vector3(0, 3.0, 0), UI.GOLD_LIGHT)
+	fx_burst(pos + Vector3(0, 1.5, 0), Color(1, 0.85, 0.3), 40)
+	_shake = 0.4
+	Sfx.play("cash", -2.0)
+
+
+# ------------------------------------------------------------------ Big Day
+
+## Starts the chapter finale: a timed rush; serve the goal before time runs out.
+func start_big_day() -> bool:
+	if bd_active or not Game.big_day_replayable() or _bd_cool > 0.0:
+		return false
+	bd = Game.big_day_def().duplicate()
+	bd_active = true
+	bd_left = float(bd.get("seconds", 150))
+	bd_served = 0
+	bd_walkouts = 0
+	bd_scores = []
+	spawn_t = 0.5
+	group_left = 3
+	for c in queue:
+		if is_instance_valid(c):
+			c.waited = 0.0          # the festival starts fresh for everyone already in line
+	_golden_clear()
+	Sfx.play("build", -2.0, 0.8)
+	return true
+
+
+func bd_goal() -> int:
+	return int(bd.get("goal", 40))
+
+
+func bd_rating() -> float:
+	if bd_scores.is_empty():
+		return 5.0
+	var s := 0.0
+	for x in bd_scores:
+		s += float(x)
+	return s / bd_scores.size()
+
+
+func _bd_count(guests: int, score: float) -> void:
+	if not bd_active:
+		return
+	bd_served += guests
+	for i in guests:
+		bd_scores.append(score)
+
+
+func _bd_tick(delta: float) -> void:
+	_bd_cool = maxf(0.0, _bd_cool - delta)
+	if not bd_active:
+		return
+	bd_left -= delta
+	if bd_served >= bd_goal():
+		_bd_end(true)
+	elif bd_left <= 0.0 or bd_walkouts > bd_max_walkouts():
+		_bd_end(false)
+
+
+func bd_max_walkouts() -> int:
+	return int(bd.get("max_walkouts", bd_goal() / 3))
+
+
+func _bd_end(won: bool) -> void:
+	bd_active = false
+	if not won:
+		_bd_cool = 45.0
+	else:
+		Game.stats.bigdays += 1
+	var clean := won and bd_walkouts == 0
+	Game.big_day_result(won, clean)
+	big_day_finished.emit(won, bd_served, bd_goal())
+	if won:
+		fx_burst(player.global_position + Vector3(0, 2, 0), Color(1, 0.85, 0.3), 60)
+		Sfx.play("cash", 0.0)

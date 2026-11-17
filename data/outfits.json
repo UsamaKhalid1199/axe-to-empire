@@ -1,0 +1,26 @@
+{
+	"_doc": "Player wardrobe. slot: shirt|hat|pants. color/secondary are sRGB 0-1. price = cash, stars = chapter stars needed (gate, not spent). shirt: pattern plain|plaid|stripes; 'vest' = hi-vis vest tint over the shirt; 'original' = keep the painted texture (color is only the shop swatch). hat: mesh none|beanie|cap|hardhat|ranger|chef.",
+	"items": [
+		{"id": "shirt_orange", "slot": "shirt", "name": "Hi-Vis Vest", "color": [0.96, 0.42, 0.10], "vest": [1.0, 1.0, 1.0], "original": true, "price": 0},
+		{"id": "shirt_flannel_red", "slot": "shirt", "name": "Red Flannel", "color": [0.72, 0.10, 0.08], "secondary": [0.10, 0.08, 0.08], "pattern": "plaid", "price": 500},
+		{"id": "shirt_hoodie_forest", "slot": "shirt", "name": "Forest Hoodie", "color": [0.20, 0.42, 0.24], "price": 2000},
+		{"id": "shirt_denim", "slot": "shirt", "name": "Denim Work Shirt", "color": [0.32, 0.47, 0.70], "price": 8000},
+		{"id": "shirt_lake_plaid", "slot": "shirt", "name": "Lake Plaid", "color": [0.16, 0.34, 0.62], "secondary": [0.06, 0.10, 0.20], "pattern": "plaid", "price": 25000},
+		{"id": "shirt_crew_chief", "slot": "shirt", "name": "Crew Chief Vest", "color": [0.90, 0.20, 0.16], "vest": [1.0, 0.42, 0.40], "under": [0.92, 0.92, 0.90], "price": 80000},
+		{"id": "shirt_sailor", "slot": "shirt", "name": "Lakeside Stripes", "color": [0.94, 0.94, 0.92], "secondary": [0.12, 0.18, 0.42], "pattern": "stripes", "price": 0, "stars": 3},
+		{"id": "shirt_gold_flannel", "slot": "shirt", "name": "Golden Flannel", "color": [0.95, 0.68, 0.16], "secondary": [0.14, 0.10, 0.06], "pattern": "plaid", "price": 250000, "stars": 10},
+
+		{"id": "hat_none", "slot": "hat", "name": "No Hat", "mesh": "none", "color": [0.45, 0.32, 0.22], "price": 0},
+		{"id": "hat_beanie", "slot": "hat", "name": "Ember Beanie", "mesh": "beanie", "color": [0.80, 0.18, 0.12], "secondary": [0.95, 0.90, 0.80], "price": 500},
+		{"id": "hat_cap", "slot": "hat", "name": "Camp Cap", "mesh": "cap", "color": [0.18, 0.38, 0.22], "secondary": [0.92, 0.88, 0.78], "price": 2000},
+		{"id": "hat_hardhat", "slot": "hat", "name": "Yellow Hard Hat", "mesh": "hardhat", "color": [1.0, 0.78, 0.10], "price": 8000},
+		{"id": "hat_ranger", "slot": "hat", "name": "Ranger Hat", "mesh": "ranger", "color": [0.62, 0.48, 0.30], "secondary": [0.25, 0.16, 0.10], "price": 25000, "stars": 3},
+		{"id": "hat_chef", "slot": "hat", "name": "Chef's Toque", "mesh": "chef", "color": [0.97, 0.97, 0.95], "price": 0, "stars": 6},
+
+		{"id": "pants_dark", "slot": "pants", "name": "Work Pants", "color": [0.24, 0.24, 0.26], "original": true, "price": 0},
+		{"id": "pants_denim", "slot": "pants", "name": "Blue Denim", "color": [0.24, 0.36, 0.58], "price": 500},
+		{"id": "pants_khaki", "slot": "pants", "name": "Khaki Chinos", "color": [0.72, 0.62, 0.44], "price": 2000},
+		{"id": "pants_olive", "slot": "pants", "name": "Olive Cargo", "color": [0.36, 0.40, 0.22], "price": 8000},
+		{"id": "pants_cherry", "slot": "pants", "name": "Cherry Overalls", "color": [0.62, 0.12, 0.12], "price": 80000, "stars": 6}
+	]
+}

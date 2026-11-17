@@ -71,6 +71,10 @@ func _ready() -> void:
 	body.skin = load(MERGED + "skin.res")
 	_set_variant("full")
 	play("idle")
+	# player.gd builds a bare CharacterRig; agents call outfit(kind) afterwards
+	var p := get_parent()
+	if p and p.get_script() and p.get_script().get_global_name() == &"Player":
+		_enable_outfit()
 
 
 const MERGED := BASE + "merged/"
@@ -165,6 +169,8 @@ func outfit(kind: String, seed_i := 0) -> void:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = seed_i * 7919 + 13
 	match kind:
+		"player":
+			_enable_outfit()
 		"lumberjack":
 			_tint("Shirt", Color(0.85, 0.32, 0.25))
 			_tint("Vest", Color(0.55, 0.75, 1.0))
@@ -199,3 +205,148 @@ func _tint(part_name: String, c: Color) -> void:
 			m.albedo_color = c
 			_tints[key] = m
 		body.set_surface_override_material(si, _tints[key])
+
+
+# ------------------------------------------------------------------ player wardrobe
+## Shirt/Pants/Vest/Helmet are separate surfaces of the merged mesh, so outfits only swap per-surface
+## materials (no extra draws). Hats that the mesh lacks are one merged vertex-coloured mesh on the head bone.
+
+const HEAD_BONE := "mixamorig1_Head"
+## Recolour: keep the painted folds/dirt (luminance), replace the hue. Optional plaid/stripes from UV.
+const RECOLOR_SHADER := """
+shader_type spatial;
+render_mode cull_back;
+uniform sampler2D tex : source_color, filter_linear_mipmap, repeat_enable;
+uniform vec3 col_a : source_color = vec3(1.0);
+uniform vec3 col_b : source_color = vec3(0.0);
+uniform int pattern = 0;
+uniform float gain = 3.0;
+uniform float freq = 36.0;
+uniform float rough = 0.85;
+uniform float flatten = 0.0;
+//NORMAL_DECL
+float band(float x, float a, float b) {
+	float w = fwidth(x) * 1.5 + 0.001;
+	return smoothstep(a - w, a + w, x) - smoothstep(b - w, b + w, x);
+}
+void fragment() {
+	vec3 t = texture(tex, UV).rgb;
+	float l = dot(t, vec3(0.299, 0.587, 0.114));
+	// vest as shirt: hide the yellow reflective bands (green ~ red there, unlike the orange cloth)
+	l = mix(l, 0.42, flatten * smoothstep(0.55, 0.8, t.g / max(t.r, 0.02)));
+	float shade = clamp(sqrt(l * gain), 0.3, 1.25);
+	vec3 c = col_a;
+	if (pattern == 1) {
+		vec2 g = fract(UV * freq);
+		float bx = band(g.x, 0.0, 0.42);
+		float by = band(g.y, 0.0, 0.42);
+		c = mix(col_a, col_b, clamp((bx + by) * 0.5, 0.0, 1.0));
+		float th = max(band(g.x, 0.66, 0.70), band(g.y, 0.66, 0.70));
+		c = mix(c, mix(col_a, vec3(1.0), 0.45), th * 0.6);
+	} else if (pattern == 2) {
+		c = mix(col_a, col_b, band(fract(UV.y * freq), 0.0, 0.4));
+	}
+	ALBEDO = c * shade;
+	ROUGHNESS = rough;
+	//NORMAL_USE
+}
+"""
+const PATTERNS := {"plain": 0, "plaid": 1, "stripes": 2}
+const GAIN := {"Shirt": 4.0, "Pants": 4.0, "Vest": 2.3}
+
+static var _recolor_shaders := {}
+static var _recolor_mats := {}
+
+var wears_outfit := false
+var _hat: MeshInstance3D
+
+
+func _enable_outfit() -> void:
+	if wears_outfit:
+		return
+	wears_outfit = true
+	var g := get_node_or_null("/root/Game")
+	if g and g.has_signal("profile_changed") and not g.profile_changed.is_connected(apply_outfit):
+		g.profile_changed.connect(apply_outfit)
+	apply_outfit()
+
+
+## Re-reads Game.profile and dresses the rig (player only). Safe to call any time after _ready.
+func apply_outfit() -> void:
+	Wardrobe.apply(self)
+
+
+## Dresses the rig with catalog items (dictionaries from Wardrobe.item). Used by Wardrobe.apply.
+func wear(shirt: Dictionary, hat: Dictionary, pants: Dictionary) -> void:
+	if body == null:
+		return
+	# The "bare" mesh has no torso (it is cut away under the vest), so the player always keeps the
+	# Vest surface: hi-vis items tint it, every other shirt recolours it into the shirt's torso.
+	var vest: Array = shirt.get("vest", [])
+	var hat_kind: String = hat.get("mesh", "none")
+	var builtin_helmet := hat_kind == "hardhat"
+	_tint_of.clear()
+	if not vest.is_empty():
+		_tint_of["Vest"] = Color(vest[0], vest[1], vest[2])
+	if builtin_helmet:
+		var hc: Array = hat.get("color", [1, 1, 1])
+		_tint_of["Helmet"] = Color(hc[0], hc[1], hc[2]) * 1.1
+	_set_variant("full" if builtin_helmet else "nohelmet")
+	if vest.is_empty():
+		_recolor("Vest", shirt)
+	if shirt.has("under"):
+		var u: Array = shirt.under
+		_recolor("Shirt", {"id": shirt.get("id", "") + ":under", "color": u})
+	elif not shirt.get("original", false):
+		_recolor("Shirt", shirt)
+	if not pants.get("original", false):
+		_recolor("Pants", pants)
+	var hm: ArrayMesh = null if builtin_helmet else Wardrobe.hat_mesh(hat)
+	if hm == null:
+		if _hat:
+			_hat.visible = false
+		return
+	if _hat == null:
+		_hat = MeshInstance3D.new()
+		_hat.name = "Hat"
+		attach(HEAD_BONE, _hat)
+	_hat.mesh = hm
+	_hat.cast_shadow = body.cast_shadow
+	_hat.visible = true
+
+
+func _recolor(part: String, it: Dictionary) -> void:
+	var si := _surface(part)
+	if si < 0 or not it.has("color"):
+		return
+	var src: Material = body.mesh.surface_get_material(si)
+	if not (src is StandardMaterial3D):
+		return
+	var lite := OS.has_feature("mobile")
+	var key := "%s:%s:%s:%s" % [part, it.get("id", ""), it.color, lite]
+	if not _recolor_mats.has(key):
+		var sm: StandardMaterial3D = src
+		var normal := sm.normal_enabled and not lite and sm.normal_texture != null
+		if not _recolor_shaders.has(normal):
+			var sh := Shader.new()
+			var code := RECOLOR_SHADER
+			if normal:
+				code = code.replace("//NORMAL_DECL", "uniform sampler2D nrm : hint_normal, filter_linear_mipmap;")
+				code = code.replace("//NORMAL_USE", "NORMAL_MAP = texture(nrm, UV).rgb;")
+			sh.code = code
+			_recolor_shaders[normal] = sh
+		var m := ShaderMaterial.new()
+		m.shader = _recolor_shaders[normal]
+		var a: Array = it.color
+		var b: Array = it.get("secondary", a)
+		m.set_shader_parameter("tex", sm.albedo_texture)
+		m.set_shader_parameter("col_a", Color(a[0], a[1], a[2]))
+		m.set_shader_parameter("col_b", Color(b[0], b[1], b[2]))
+		m.set_shader_parameter("pattern", PATTERNS.get(it.get("pattern", "plain"), 0))
+		m.set_shader_parameter("gain", GAIN.get(part, 3.0))
+		m.set_shader_parameter("flatten", 1.0 if part == "Vest" else 0.0)
+		m.set_shader_parameter("rough", 0.85 if lite else 0.75)
+		if normal:
+			m.set_shader_parameter("nrm", sm.normal_texture)
+		_recolor_mats[key] = m
+	body.set_surface_override_material(si, _recolor_mats[key])

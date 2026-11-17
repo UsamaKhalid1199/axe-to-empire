@@ -11,12 +11,27 @@ Godot 4.7.2, GDScript, `gl_compatibility` renderer. Tuned for low-end phones (Po
    and only once you've walked away, so you keep moving through the forest. The harvester (top tool) is ridden
    only in the forest: you climb in past the tree line and step out at the camp edge (it stays parked there),
    so building, cooking and serving are always on foot.
-2. Stack logs by the cooker, carry food to the counter, serve the queue, collect coins.
-3. Build pads (tables, tool shed, crew cabin, second cooker), buy tool/bag/boots and kitchen upgrades.
-4. Hire lumberjacks (they sell surplus wood at the truck when the pile is full), waiters and cooks.
-5. Meet the gate checklist (builds, guests served, rating, coins) to unlock the next venue. Use the **MAP**
-   button to travel. Crews at venues you leave keep earning at 50%. While the game is closed, hired crews earn
-   at 50% for the time you were actually away (up to 2 hours); no crew, no away earnings.
+2. Stack logs by the cooker, carry food to the counter, serve the queue, collect cash (green banknotes, `$`).
+3. Build pads (tables, tool shed, crew cabin, second cooker), buy tool/bag/boots at the shop.
+4. Hire lumberjacks, waiters and cooks. The crew is slower and carries less than you, and lumberjacks never sell
+   wood: when the pile is full they rest. Serving the line yourself pays a +SERVICE bonus.
+5. Follow the **job card** (top left): a 13-step task chain per chapter with a cash reward per step.
+6. Upgrade the five stations (kitchen, menu, dining, sign, signature station) from Lv 1 to 25 in **UPGRADE**.
+   Shown levels 5/10/15/20/25 are timed renovations (finish early with cash).
+7. When every pad is built, start the chapter's **Big Day** at the gate: serve the goal within 180 s without
+   too many walkouts. Winning opens the gate and earns the first star; more stars (served 2x the gate goal at
+   rating 4.5+, a clean Big Day with all stations Lv 15+) raise income.
+8. Use **MAP** to travel. Background venues earn at a reduced rate; away earnings are capped at 1-4 h depending
+   on unlocked venues and need a crew. The game really pauses (tree + audio) when the phone locks.
+
+Guests have moods (happy / impatient / angry faces): happy guests pay +20%; past their patience they walk out,
+annoying the two guests behind them. When the line is full, passers-by walk on ("TOO BUSY!") and the sale is lost.
+Groups arrive in bursts, and a golden tree sometimes appears for a big cash reward.
+
+The story (`data/story.json`, design in `docs/DESIGN.md`): Old Mags and her ally in each chapter against the
+Grayline chain, told through story cards with portraits. The **ME** button opens the character screen (gear and a
+19-piece wardrobe from `data/outfits.json`), and Settings has sound, vibration, story cards, FPS, graphics, how to
+play, stats, story replay, reset and credits.
 
 | # | Venue | Product | Cooker | Signature station (new mechanic) | Cost scale |
 |---|---|---|---|---|---|
@@ -47,7 +62,10 @@ there are 12 logs on the pile. Tools, bag and boots carry over between venues; b
 | Path | What it is |
 |---|---|
 | `data/game.json` | Base numbers: builds, upgrades, crew, menu, gate, trees. Tune here. |
-| `data/chapters.json` | Chapter names, products, build names, themes and the growth multipliers |
+| `data/chapters.json` | Chapter names, products, build names, themes, crowd tuning, Big Day goals and the growth multipliers |
+| `data/story.json` | Characters, story beats and the per-chapter task chain |
+| `data/outfits.json` | Wardrobe items (shirts, hats, pants), prices and star gates |
+| `docs/DESIGN.md` | Game design: story, loop, moods, crew vs player, stations, stars, roadmap |
 | `scripts/core/game_state.gd` | Autoload `Game`: economy, chapter config scaling, per-venue state, empire income, prestige, save/load + migration, offline earnings, jobs |
 | `scripts/main.gd` | Boot, threaded preloading, staged venue build behind the loading screen, travel, graphics quality + auto downgrade |
 | `scripts/world/` | World build, player, crew/customers, trees, procedural art, character rig (two-hand chainsaw IK), `specials.gd` (each chapter's signature station) |
@@ -62,7 +80,8 @@ there are 12 logs on the pile. Tools, bag and boots carry over between venues; b
 G=E:/Work/tools/godot/Godot_v4.7.2-stable_win64_console.exe
 $G --headless --path . --script res://tests/flowtest.gd             # A-Z empire flow: gate, travel, save/load, prestige (20 checks)
 $G --headless --path . --script res://tests/autoplay.gd -- 8 60 0   # bot plays chapter 0 at 8x and prints pacing
-$G --headless --path . --script res://tests/lumbertest.gd           # lumberjacks sell surplus wood
+$G --headless --path . --script res://tests/lumbertest.gd           # lumberjacks stack logs and rest (never sell)
+$G --headless --path . --script res://tests/wardrobetest.gd         # wardrobe buy/equip/persist
 $G --headless --path . --script res://tests/regrowtest.gd           # stumps wait until the player leaves
 $G --headless --path . --script res://tests/harvtest.gd             # ride the harvester in the forest, walk in camp
 $G --headless --path . --script res://tests/specialtest.gd -- 1     # signature station of chapter 1..5 (player + crew)
@@ -71,8 +90,8 @@ $G --path . --resolution 720x1280 --script res://tests/uishot2.gd -- <outdir>   
 $G --path . --resolution 540x960 --script res://tests/chaptershot.gd -- <out.png> <chapter> sp   # frame a chapter's station
 ```
 
-Bot pacing (gate reached, game minutes at 8x): chapter 1 ~49, chapter 2 ~56, chapter 3 ~51. The bot buys every
-upgrade before saving for the gate, so a focused player is faster.
+Bot pacing (chapter finished including the Big Day): chapter 1 ~32 min. The bot also buys station upgrades
+along the way, so a focused player is faster.
 
 ## Build and run on a phone
 
