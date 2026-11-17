@@ -14,6 +14,7 @@ var bubble: Node3D
 var bubble_label: Label3D
 var hands: Stack
 var paid := 0
+var vip := false
 
 
 func setup(w: Node, seed_i: int) -> Customer:
@@ -23,6 +24,11 @@ func setup(w: Node, seed_i: int) -> Customer:
 	walker = true
 	patience = float(c.patience)
 	order = randi_range(int(c.order_min), int(c.order_max))
+	patience *= w.patience_mult()
+	vip = w.specials != null and w.specials.roll_vip()
+	if vip:
+		order += 2
+		patience *= 0.6
 	set_meta("seed", seed_i)
 	return self
 
@@ -68,9 +74,10 @@ func _process(delta: float) -> void:
 			waited += delta
 			var front: bool = slot == 0
 			bubble.visible = true
-			bubble_label.text = "%d" % (order - got)
+			bubble_label.text = ("VIP %d" if vip else "%d") % (order - got)
 			var urgency := waited / patience
-			bubble_label.modulate = Color(1, 1, 1).lerp(Color("#FF6B5B"), clampf((urgency - 0.5) * 2.0, 0.0, 1.0))
+			var base_col := Color("#FFD24A") if vip else Color(1, 1, 1)
+			bubble_label.modulate = base_col.lerp(Color("#FF6B5B"), clampf((urgency - 0.5) * 2.0, 0.0, 1.0))
 			if path.is_empty():
 				face(global_position + Vector3(0, 0, -1), delta)
 			else:
@@ -111,7 +118,7 @@ func _process(delta: float) -> void:
 
 func _pay() -> void:
 	bubble.visible = false
-	paid = order * Game.dish_price()
+	paid = int(round(order * Game.dish_price() * world.price_mult() * (3.0 if vip else 1.0)))
 	var score := 5.0 if waited < 15.0 else (4.0 if waited < 28.0 else 3.0)
 	world.customer_paid(self, paid, score)
 	world.queue_leave(self)

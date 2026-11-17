@@ -162,6 +162,18 @@
           1.05,
           0.75
         ]
+      },
+      "special": {
+        "type": "drive_thru",
+        "name": "Drive-thru window",
+        "cost": 350,
+        "requires": [
+          "tables_1",
+          "shop"
+        ],
+        "bonus": 0.35,
+        "desc": "Cars queue on the road and pay 1.5x by card",
+        "intro": "New at the Shack: a drive-thru. Hand dishes through the window, cars pay 1.5x."
       }
     },
     {
@@ -241,6 +253,18 @@
           1.3
         ],
         "water": true
+      },
+      "special": {
+        "type": "raft",
+        "name": "Timber raft",
+        "cost": 350,
+        "requires": [
+          "tables_1",
+          "shop"
+        ],
+        "bonus": 0.25,
+        "desc": "Float logs to the sawmill for 3x the truck price",
+        "intro": "New at the Lake: a timber raft. Load logs, it sails to the sawmill and pays 3x."
       }
     },
     {
@@ -320,6 +344,18 @@
           0.8
         ],
         "snow": true
+      },
+      "special": {
+        "type": "fireplace",
+        "name": "Lodge fireplace",
+        "cost": 350,
+        "requires": [
+          "tables_1",
+          "shop"
+        ],
+        "bonus": 0.3,
+        "desc": "Keep it burning: warm guests pay +50% and wait longer",
+        "intro": "New at the Lodge: a big fireplace. Keep it fed with logs and guests pay +50%."
       }
     },
     {
@@ -398,6 +434,18 @@
           0.55,
           0.42
         ]
+      },
+      "special": {
+        "type": "bell",
+        "name": "Fair bell",
+        "cost": 350,
+        "requires": [
+          "tables_1",
+          "shop"
+        ],
+        "bonus": 0.3,
+        "desc": "Ring it for a harvest-fair rush: crowds pay double",
+        "intro": "New at the Smokehouse: the fair bell. Ring it for a rush of guests paying double."
       }
     },
     {
@@ -476,6 +524,18 @@
           1.2,
           1.15
         ]
+      },
+      "special": {
+        "type": "van",
+        "name": "Room-service van",
+        "cost": 350,
+        "requires": [
+          "tables_1",
+          "shop"
+        ],
+        "bonus": 0.4,
+        "desc": "Load dishes, the van delivers them for 2x. VIP guests pay 3x",
+        "intro": "New at the Hotel: room service and VIP guests. Load the van, it delivers for 2x."
       }
     }
   ]

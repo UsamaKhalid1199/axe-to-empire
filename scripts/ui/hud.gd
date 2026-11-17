@@ -537,8 +537,9 @@ func _gate(v: VBoxContainer) -> void:
 		_header(v, "gate", String(nx.name), "Next venue: " + String(nx.tagline).to_lower())
 	var g: Dictionary = Game.cfg.gate
 	var s := Game.gate_status()
+	var need_built: Array = ["tables_2", "crew_hut"] + (["special"] if Game.special_type() != "" else [])
 	var reqs := [
-		[s.built, "Build every camp upgrade", "Tables + crew cabin"],
+		[s.built, "Build every camp upgrade", "%d / %d" % [need_built.filter(func(id): return Game.built.has(id)).size(), need_built.size()]],
 		[s.served, "Serve %d guests" % int(g.served), "%d / %d" % [Game.vserved, int(g.served)]],
 		[s.rating, "Keep a %.1f★ rating" % float(g.rating), "%.1f now" % Game.rating()],
 		[s.coins, "Save %s coins" % UI.fmt(int(g.coins)), "%s / %s" % [UI.fmt(Game.coins), UI.fmt(int(g.coins))]],
@@ -590,7 +591,7 @@ func _complete(v: VBoxContainer) -> void:
 		txt = "You built the whole Timber Empire! Start a New Empire: everything resets, but every coin you earn is worth +50% more, forever."
 	else:
 		var nx: Dictionary = Game.chapters[Game.venue + 1]
-		txt = "%s is open: %s. Your crew here keeps working and earns for you while you're away." % [nx.name, String(nx.tagline).to_lower()]
+		txt = "%s is open: %s. New there: %s. Your crew here keeps working and earns for you while you're away." % [nx.name, String(nx.tagline).to_lower(), String(nx.get("special", {}).get("name", "")).to_lower()]
 	var l := UI.label(txt, 22, UI.MUTED, null, HORIZONTAL_ALIGNMENT_CENTER)
 	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	v.add_child(l)
@@ -646,7 +647,10 @@ func _empire(v: VBoxContainer) -> void:
 		else:
 			btn = _price_button(0, Callable(), "LOCKED")
 			stat = "Unlock at chapter %d's gate" % k
-		_row(list, "lock" if k >= Game.unlocked else "star", "%d. %s" % [k + 1, ch.name], String(ch.tagline), stat, btn)
+		var desc := String(ch.tagline)
+		if ch.has("special"):
+			desc += " · New: " + String(ch.special.name)
+		_row(list, "lock" if k >= Game.unlocked else "star", "%d. %s" % [k + 1, ch.name], desc, stat, btn)
 	if Game.prestige > 0:
 		v.add_child(UI.label("Empire %d · income x%.1f" % [Game.prestige + 1, Game.income_mult()], 22, UI.GOLD_LIGHT, null, HORIZONTAL_ALIGNMENT_CENTER))
 	var cb := UI.button("CLOSE", "dark", "", 28)

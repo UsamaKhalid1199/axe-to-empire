@@ -40,6 +40,7 @@ var ftue := 0
 var woodpile := 0
 var rack := 0
 var counter_coins := 0
+var sp: Dictionary = {}             # the active venue's signature-station state (fuel, raft, van, ...)
 var mute := false
 ## Graphics: 0 smooth, 1 balanced, 2 beautiful. quality_auto lets the game drop a level when fps stays low.
 var quality := 1
@@ -121,19 +122,26 @@ func chapter_cfg(k: int) -> Dictionary:
 		var costs: Array = c.crew[role].costs
 		for i in costs.size():
 			costs[i] = int(round(float(costs[i]) * m))
+	# the chapter's signature station is one more build pad, and the gate needs it
+	var spc: Dictionary = ch.get("special", {})
+	if not spc.is_empty():
+		var gi: int = c.builds.size() - 1
+		c.builds.insert(gi, {"id": "special", "name": spc.name, "cost": int(round(float(spc.cost) * m)),
+			"requires": spc.requires, "desc": spc.desc})
+		c.builds[gi + 1].requires = c.builds[gi + 1].requires + ["special"]
 	c.log_sell_price = int(round(float(c.log_sell_price) * m))
 	c.gate.coins = int(round(float(c.gate.coins) * m))
 	c.gate.served = int(c.gate.served) + 40 * k
 	return c
 
 
-const VENUE_KEYS := ["built", "pad_paid", "crew", "woodpile", "rack", "counter_coins", "rating_hist", "vserved", "chapter_done"]
+const VENUE_KEYS := ["built", "pad_paid", "crew", "woodpile", "rack", "counter_coins", "rating_hist", "vserved", "chapter_done", "sp"]
 
 
 func _snapshot() -> Dictionary:
 	return {"built": built.duplicate(true), "pad_paid": pad_paid.duplicate(true), "crew": crew.duplicate(true),
 		"woodpile": woodpile, "rack": rack, "counter_coins": counter_coins, "rating_hist": rating_hist.duplicate(),
-		"vserved": vserved, "chapter_done": chapter_done, "fire": levels.fire, "menu": levels.menu}
+		"vserved": vserved, "chapter_done": chapter_done, "fire": levels.fire, "menu": levels.menu, "sp": sp.duplicate(true)}
 
 
 func _stash() -> void:
@@ -159,6 +167,7 @@ func _unstash(k: int) -> void:
 	chapter_done = bool(d.get("chapter_done", false))
 	levels.fire = int(d.get("fire", 0))
 	levels.menu = int(d.get("menu", 0))
+	sp = d.get("sp", {}).duplicate(true)
 
 
 ## Switch the active venue. The scene must be rebuilt afterwards (main.gd does it).
@@ -166,12 +175,37 @@ func travel(k: int) -> bool:
 	if k == venue or k < 0 or k >= unlocked:
 		return false
 	_stash()
+	var first: bool = k >= venues.size() or venues[k].is_empty()
 	venue = k
 	_unstash(k)
 	cfg = chapter_cfg(k)
+	if first and k > 0:
+		_head_start()
 	_rates_t = 0.0
 	save_game()
 	return true
+
+
+## First arrival at a new venue: the crew you brought sets up the cooker, one lumberjack comes along
+## and there is a little firewood, so a new chapter starts from your empire, not from nothing.
+func _head_start() -> void:
+	built["campfire"] = true
+	crew.lumberjack = maxi(crew.lumberjack, 1)
+	woodpile = maxi(woodpile, 12)
+	head_start_note = true
+
+
+var head_start_note := false
+
+
+## The active chapter's signature station type ("" for the first chapter).
+func special_type(k := -1) -> String:
+	var ch: Dictionary = chapters[venue if k < 0 else k]
+	return String(ch.get("special", {}).get("type", ""))
+
+
+func special_def(k := -1) -> Dictionary:
+	return chapters[venue if k < 0 else k].get("special", {})
 
 
 func is_last_chapter() -> bool:
@@ -189,7 +223,14 @@ func venue_rate(k: int) -> float:
 	var cr: Dictionary = d.get("crew", {})
 	var b: Dictionary = d.get("built", {})
 	return _rate(int(cr.get("lumberjack", 0)), int(cr.get("waiter", 0)), int(cr.get("cook", 0)), b,
-		int(d.get("fire", 0)), int(d.get("menu", 0)), cc)
+		int(d.get("fire", 0)), int(d.get("menu", 0)), cc) * _special_mult(k, b)
+
+
+## Crew income bonus once the chapter's signature station is built.
+func _special_mult(k: int, b: Dictionary) -> float:
+	if not b.has("special"):
+		return 1.0
+	return 1.0 + float(special_def(k).get("bonus", 0.0))
 
 
 ## Background income from every venue except the active one (coins/s, after efficiency).
@@ -390,7 +431,8 @@ func gate_status() -> Dictionary:
 	var g: Dictionary = cfg.gate
 	return {
 		"coins": coins >= int(g.coins), "rating": rating() >= float(g.rating),
-		"served": vserved >= int(g.served), "built": built.has("tables_2") and built.has("crew_hut"),
+		"served": vserved >= int(g.served),
+		"built": built.has("tables_2") and built.has("crew_hut") and (special_type() == "" or built.has("special")),
 	}
 
 
@@ -414,7 +456,7 @@ func open_next_venue() -> void:
 
 ## Sustained coins per second the crew can make without the player (min of the chain).
 func passive_rate() -> float:
-	return _rate(crew.lumberjack, crew.waiter, crew.cook, built, levels.fire, levels.menu, cfg)
+	return _rate(crew.lumberjack, crew.waiter, crew.cook, built, levels.fire, levels.menu, cfg) * _special_mult(venue, built)
 
 
 func _rate(lj: int, waiters: int, cooks: int, b: Dictionary, fire_lv: int, menu_lv: int, cc: Dictionary) -> float:
@@ -534,7 +576,7 @@ func to_dict() -> Dictionary:
 		"chapter_done": chapter_done, "ftue": ftue, "woodpile": woodpile, "rack": rack,
 		"counter_coins": counter_coins, "jobs_day": jobs_day, "jobs": jobs, "streak": streak,
 		"streak_last_day": streak_last_day, "chest_claimed": chest_claimed, "mute": mute, "quality": quality, "quality_auto": quality_auto,
-		"venue": venue, "unlocked": unlocked, "venues": _venues_for_save(), "vserved": vserved, "prestige": prestige,
+		"sp": sp, "venue": venue, "unlocked": unlocked, "venues": _venues_for_save(), "vserved": vserved, "prestige": prestige,
 		"t": int(Time.get_unix_time_from_system()),
 	}
 
@@ -604,6 +646,7 @@ func load_game() -> void:
 	prestige = int(d.get("prestige", 0))
 	vserved = int(d.get("vserved", served))
 	venues = d.get("venues", [])
+	sp = d.get("sp", {})
 	# saves from before the empire update: an opened gate unlocks chapter 2
 	unlocked = int(d.get("unlocked", 2 if chapter_done else 1))
 	if chapter_done:
@@ -625,10 +668,8 @@ func _compute_offline(t_saved: int) -> void:
 			rate += venue_rate(k) * VENUE_EFFICIENCY
 	if rate <= 0.0:
 		return
-	# floor: at least 10 minutes of income once you have a working crew
-	var secs: int = maxi(capped, 600)
 	offline_seconds = capped
-	offline_reward = int(rate * secs * float(o.efficiency))
+	offline_reward = int(rate * capped * float(o.efficiency))
 
 
 func claim_offline() -> void:
@@ -644,7 +685,7 @@ func reset_all() -> void:
 	coins = 0; served = 0; built = {}; pad_paid = {}
 	levels = {"tool": 0, "bag": 0, "boots": 0, "fire": 0, "menu": 0}
 	crew = {"lumberjack": 0, "waiter": 0, "cook": 0}
-	rating_hist = []; chapter_done = false; ftue = 0; woodpile = 0; rack = 0; counter_coins = 0
+	rating_hist = []; chapter_done = false; ftue = 0; woodpile = 0; rack = 0; counter_coins = 0; sp = {}
 	venue = 0; unlocked = 1; venues = []; vserved = 0; prestige = 0; cfg = chapter_cfg(0)
 	stats = {"trees": 0, "logs": 0, "served": 0, "earned": 0, "sold": 0, "play_s": 0.0}
 	jobs_day = ""; refresh_jobs()

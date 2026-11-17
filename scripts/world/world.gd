@@ -63,6 +63,7 @@ var _engaged := {}          # zone -> player has stopped on it (actions running)
 var _obj_t := 0.0
 var cam_off := Vector3(0, 10.5, 8.2)
 var theme: Dictionary = {}
+var specials: Specials
 
 
 func _tc(key: String, def: Color) -> Color:
@@ -119,7 +120,15 @@ func _finish_build() -> void:
 		add_child(p)
 		_fx_pool.append(p)
 	_make_arrow()
+	specials = Specials.new().setup(self)
+	add_child(specials)
 	_rebuild_all(false)
+	if Game.head_start_note:
+		Game.head_start_note = false
+		Game.toast.emit("Your crew set up the " + String(Game.build_def("campfire").name).to_lower())
+		var intro := String(Game.special_def().get("intro", ""))
+		if intro != "":
+			Game.toast.emit(intro)
 	Game.state_changed.connect(_on_state_changed)
 
 
@@ -306,7 +315,7 @@ func _decor() -> void:
 			0: p = Vector3(rng.randf_range(-24, -15.8), 0, rng.randf_range(-30, 16))
 			1: p = Vector3(rng.randf_range(15.8, 24), 0, rng.randf_range(-30, 16)) if not theme.get("water", false) else Vector3(rng.randf_range(-24, -15.8), 0, rng.randf_range(-30, 16))
 			2: p = Vector3(rng.randf_range(-16, 16), 0, rng.randf_range(-33, -26))
-			_: p = Vector3(rng.randf_range(-22, 22), 0, rng.randf_range(14.6, 22))
+			_: p = Vector3(rng.randf_range(-22, 22), 0, rng.randf_range(16.5, 23))   # clear of the road and car lane
 		var mesh: Mesh = Art.broadleaf_mesh(rng.randi() % 3) if rng.randf() < 0.45 else Art.pine_mesh(rng.randi() % 4)
 		var xf := Transform3D(Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3.ONE * rng.randf_range(1.1, 1.7)), p)
 		# one MultiMesh per (mesh, side of the map) so sides off screen are culled
@@ -327,8 +336,8 @@ func _decor() -> void:
 		mmi.add_to_group("edge_forest")
 		add_child(mmi)
 	# rocks, ferns, grass
-	var spots := [[Vector3(-5.5, 0, -3.5), "rock_moss_set_01", 1.0], [Vector3(8.5, 0, 0.5), "rock_moss_set_01", 1.3],
-		[Vector3(-12, 0, 8), "rock_moss_set_01", 1.6], [Vector3(10, 0, 9.5), "dead_tree_trunk", 1.0],
+	var spots := [[Vector3(-5.5, 0, -3.5), "rock_moss_set_01", 1.0], [Vector3(-10.8, 0, -2.2), "rock_moss_set_01", 1.3],
+		[Vector3(-12, 0, 8), "rock_moss_set_01", 1.6], [Vector3(12.9, 0, -2.6), "dead_tree_trunk", 1.0],
 		[Vector3(-6.5, 0, 8.5), "dead_tree_trunk", 0.9]]
 	for s in spots:
 		var m := Art.model(s[1])
@@ -455,7 +464,8 @@ func _shadows_off(n: Node) -> void:
 
 
 func _near_camp(p: Vector3) -> bool:
-	return (p.x > -9 and p.x < 9 and p.z > -4 and p.z < 13) or absf(p.z - ROAD_Z) < 2.0
+	# the east side (x 9..15) hosts each chapter's signature station
+	return (p.x > -9 and p.x < 15.5 and p.z > -4 and p.z < 14) or absf(p.z - ROAD_Z) < 2.6
 
 
 func _static_camp() -> void:
@@ -488,6 +498,105 @@ func _static_camp() -> void:
 	var barrels := Art.model("wooden_barrels_01")
 	barrels.position = Vector3(-6.8, 0, 0.6)
 	add_child(barrels)
+	_chapter_props()
+
+
+## A few props that give each venue its own identity (kept to a handful of meshes for the phone).
+func _chapter_props() -> void:
+	var ch: Dictionary = Game.chapter()
+	# road sign with the venue's name where guests arrive
+	var sign_pos := Vector3(13.4, 0, 10.0)
+	var wood := Art.pbr("bark_brown_02")
+	for x in [-0.9, 0.9]:
+		var p := Art.cylinder(0.07, 2.4, wood, sign_pos + Vector3(x, 1.2, 0), self, 6)
+		p.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+	var board := Art.box(Vector3(2.3, 0.75, 0.1), Art.plank_mat(), sign_pos + Vector3(0, 2.1, 0), self)
+	board.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+	var l := Label3D.new()
+	l.text = String(ch.name).to_upper()
+	l.font = load("res://assets/fonts/BarlowCondensed-Bold.ttf")
+	l.font_size = 76
+	l.pixel_size = 0.004
+	l.modulate = Color(0.18, 0.1, 0.04)
+	l.position = sign_pos + Vector3(0, 2.1, 0.06)
+	add_child(l)
+	var spot := Vector3(-5.3, 0, -0.5)
+	match String(ch.id):
+		"camp":
+			var tent := MeshInstance3D.new()
+			var pm := PrismMesh.new()
+			pm.size = Vector3(1.8, 1.3, 2.0)
+			pm.material = Art.paint(Color(0.85, 0.5, 0.18), 0.85)
+			tent.mesh = pm
+			tent.position = spot + Vector3(0, 0.65, 0)
+			tent.rotation.y = 0.4
+			tent.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+			add_child(tent)
+		"shack":
+			var red := Art.paint(Color(0.78, 0.12, 0.08), 0.4)
+			var pump := Art.box(Vector3(0.6, 1.5, 0.45), red, spot + Vector3(0, 0.75, 0), self)
+			pump.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+			Art.box(Vector3(0.5, 0.35, 0.47), Art.paint(Color(0.95, 0.92, 0.85), 0.3), spot + Vector3(0, 1.2, 0), self)
+			Art.box(Vector3(0.9, 0.12, 0.7), Art.paint(Color(0.3, 0.3, 0.32), 0.7), spot + Vector3(0, 0.06, 0), self)
+		"lake":
+			var boat := Art.box(Vector3(2.2, 0.35, 0.8), Art.plank_mat(), spot + Vector3(0, 0.18, 0), self)
+			boat.rotation.y = 0.5
+			boat.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+			var oar := Art.box(Vector3(1.6, 0.05, 0.12), wood, spot + Vector3(0.2, 0.42, 0.1), self)
+			oar.rotation.y = 0.9
+		"lodge":
+			var snow := Art.paint(Color(0.96, 0.97, 1.0), 0.7)
+			for i in 3:
+				var r: float = [0.42, 0.31, 0.22][i]
+				var y: float = [0.4, 1.05, 1.52][i]
+				var sm := SphereMesh.new()
+				sm.radius = r
+				sm.height = r * 2.0
+				sm.radial_segments = 10
+				sm.rings = 6
+				sm.material = snow
+				var mi := MeshInstance3D.new()
+				mi.mesh = sm
+				mi.position = spot + Vector3(0, y, 0)
+				mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+				add_child(mi)
+			for x in [-0.3, 0.3]:
+				var ski := Art.box(Vector3(0.08, 1.7, 0.05), Art.paint(Color(0.85, 0.2, 0.15), 0.4), spot + Vector3(1.0 + x, 0.85, 0.3), self)
+				ski.rotation.z = 0.12
+		"smoke":
+			var hay := Art.paint(Color(0.86, 0.7, 0.32), 0.95)
+			for i in 2:
+				var b := Art.cylinder(0.5, 0.9, hay, spot + Vector3(i * 1.05, 0.5, 0), self, 10)
+				b.rotation.x = PI / 2
+				b.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+			var pumpkin := Art.paint(Color(0.92, 0.45, 0.08), 0.6)
+			for q in [Vector3(-0.6, 0.2, 0.7), Vector3(0.4, 0.17, 0.85), Vector3(1.2, 0.22, 0.75)]:
+				var sm2 := SphereMesh.new()
+				sm2.radius = q.y * 1.4
+				sm2.height = q.y * 2.0
+				sm2.radial_segments = 10
+				sm2.rings = 5
+				sm2.material = pumpkin
+				var pk := MeshInstance3D.new()
+				pk.mesh = sm2
+				pk.position = spot + q
+				add_child(pk)
+		"hotel":
+			var stone := Art.paint(Color(0.82, 0.8, 0.76), 0.8)
+			var green := Art.paint(Color(0.2, 0.42, 0.18), 0.9)
+			for i in 2:
+				var pos := spot + Vector3(i * 1.4, 0, 0)
+				Art.box(Vector3(0.8, 0.6, 0.8), stone, pos + Vector3(0, 0.3, 0), self).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+				var sm3 := SphereMesh.new()
+				sm3.radius = 0.45
+				sm3.height = 0.8
+				sm3.radial_segments = 10
+				sm3.rings = 6
+				sm3.material = green
+				var bush := MeshInstance3D.new()
+				bush.mesh = sm3
+				bush.position = pos + Vector3(0, 0.95, 0)
+				add_child(bush)
 
 
 func _zone(id: String, kind: String, pos: Vector3, size: Vector2, color: Color, text := "", icon := "", dashed := false) -> Zone:
@@ -524,10 +633,10 @@ func _spawn_pad(id: String, animate: bool) -> void:
 	var b := Game.build_def(id)
 	var z: Zone
 	if id == "gate":
-		z = _zone(id, "gate", PADS[id], Vector2(2.4, 2.4), Color("#8EE07A"), "NEXT", "res://assets/icons/gate.svg", true)
+		z = _zone(id, "gate", pad_pos(id), Vector2(2.4, 2.4), Color("#8EE07A"), "NEXT", "res://assets/icons/gate.svg", true)
 	else:
 		var left := int(b.cost) - int(Game.pad_paid.get(id, 0))
-		z = _zone(id, "build", PADS[id], Vector2(2.0, 2.0), Color("#FFD978"), UI.fmt(left), "res://assets/icons/coin.svg", true)
+		z = _zone(id, "build", pad_pos(id), Vector2(2.0, 2.0), Color("#FFD978"), UI.fmt(left), "res://assets/icons/coin.svg", true)
 		z.set_progress(float(Game.pad_paid.get(id, 0)) / float(b.cost))
 	var name_l := Label3D.new()
 	name_l.text = String(b.name).to_upper()
@@ -628,16 +737,24 @@ func _spawn_building(id: String, animate: bool) -> void:
 			st.position = CREW_POS + Vector3(-1.6, 0, 1.4)
 			root.add_child(st)
 			_zone("crew", "crew", PADS.crew_hut, Vector2(1.9, 1.6), Color("#8EC9FF"), "CREW", "res://assets/icons/crew.svg")
+		"special":
+			specials.spawn(root)
 	if animate:
-		_push_player_clear(PADS.get(id, root.global_position))
+		_push_player_clear(pad_pos(id))
 		Sfx.play("build")
-		fx_dust(PADS.get(id, root.global_position))
+		fx_dust(pad_pos(id))
 		for c in root.get_children():
 			if c is Node3D and not (c is Stack):
 				var s: Vector3 = c.scale
 				c.scale = s * 0.01
 				c.create_tween().tween_property(c, "scale", s, 0.5).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 		Game.toast.emit(String(Game.build_def(id).name) + " built!")
+
+
+func pad_pos(id: String) -> Vector3:
+	if id == "special":
+		return specials.pad_pos()
+	return PADS.get(id, Vector3.ZERO)
 
 
 func _push_player_clear(pad: Vector3) -> void:
@@ -890,6 +1007,36 @@ func customer_paid(c: Node3D, amount: int, score: float) -> void:
 	float_text.emit("+%d" % amount, c.global_position + Vector3(0, 2.4, 0), UI.GOLD_LIGHT)
 
 
+## Price multiplier for guests paying right now (warm fireplace, fair rush).
+func price_mult() -> float:
+	return specials.price_mult() if specials else 1.0
+
+
+func patience_mult() -> float:
+	return specials.patience_mult() if specials else 1.0
+
+
+## Drive-thru cars and the room-service van pay straight into your coins.
+func card_paid(at: Vector3, amount: int, score: float, guests: int) -> void:
+	Game.add_coins(amount)
+	Game.served += guests
+	Game.vserved += guests
+	Game.stats.served += guests
+	for i in guests:
+		Game.add_rating(score)
+		Game.job_progress("serve")
+	Sfx.play("cash", -4.0)
+	float_text.emit("+%s" % UI.fmt(amount), at + Vector3(0, 2.6, 0), UI.GOLD_LIGHT)
+
+
+## Where a waiter should take dishes: the counter, or the drive-thru / van when it needs them.
+func waiter_sink(idx: int) -> String:
+	var need: int = specials.dish_need()
+	if need > 0 and (idx == 1 or counter_count() >= 3 or queue.is_empty()):
+		return "special"
+	return "counter"
+
+
 func customer_angry(c: Node3D) -> void:
 	Game.add_rating(1.0)
 	float_text.emit("TOO SLOW!", c.global_position + Vector3(0, 2.4, 0), UI.RED)
@@ -988,6 +1135,7 @@ func _process(delta: float) -> void:
 	_zones_tick(delta)
 	_fires_tick(delta)
 	_customers_tick(delta)
+	specials.tick(delta)
 	_cam_tick(delta)
 	_obj_t -= delta
 	if _obj_t <= 0.0:
@@ -1066,7 +1214,8 @@ func _zone_action(z: Zone) -> void:
 					z.set_text(UI.fmt(int(b.cost) - paid))
 					z.set_progress(float(paid) / float(b.cost))
 		_:
-			z.tick = 999.0
+			if not specials.zone_action(z):
+				z.tick = 999.0
 
 
 func _fires_tick(delta: float) -> void:
@@ -1128,12 +1277,12 @@ func spawn_interval() -> float:
 	demand += int(Game.levels.get("menu", 0)) * 0.10
 	demand += int(Game.crew.get("cook", 0)) * 0.12
 	var rate_mult := lerpf(1.3, 0.85, clampf((Game.rating() - 3.0) / 2.0, 0.0, 1.0))
-	return float(c.interval) / demand * rate_mult
+	return float(c.interval) / demand * rate_mult * (specials.spawn_mult() if specials else 1.0)
 
 
 ## A second fire and kitchen upgrades let a longer line form at the counter.
 func max_queue() -> int:
-	return int(Game.cfg.customers.max_queue) + (fires.size() - 1) + int(int(Game.levels.get("fire", 0)) >= 2)
+	return int(Game.cfg.customers.max_queue) + (fires.size() - 1) + int(int(Game.levels.get("fire", 0)) >= 2) + (specials.extra_queue() if specials else 0)
 
 
 func _spawn_customer() -> void:
@@ -1199,6 +1348,8 @@ func _make_arrow() -> void:
 
 func _update_objective() -> void:
 	var o := _compute_objective()
+	if specials.rush_active():
+		o = {"text": "FAIR RUSH x2 · %ds · " % ceili(float(Game.sp.rush)) + String(o.text), "pos": o.pos}
 	objective = o
 	var show: bool = o.pos != Vector3.ZERO and player.global_position.distance_to(o.pos) > 1.6
 	arrow.visible = show
@@ -1235,9 +1386,12 @@ func _compute_objective() -> Dictionary:
 		if pads.has(b.id) and b.id != "gate":
 			var left := int(b.cost) - int(Game.pad_paid.get(b.id, 0))
 			if Game.coins >= left:
-				return {"text": "Build: " + String(b.name), "pos": PADS[b.id]}
+				return {"text": "Build: " + String(b.name), "pos": pad_pos(b.id)}
 	if pads.has("gate") and Game.gate_ready():
 		return {"text": "Unlock " + String(Game.build_def("gate").name) + "!", "pos": PADS.gate}
+	var sp_obj: Dictionary = specials.objective(p)
+	if not sp_obj.is_empty():
+		return sp_obj
 	if p.hands.count() > 0:
 		return {"text": "Serve the guests", "pos": serve_zone.global_position}
 	var hungry := queue.size() > 0 and counter_count() == 0

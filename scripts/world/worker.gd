@@ -10,6 +10,7 @@ var hands: Stack
 var timer := 0.0
 var fire_index := 0
 var chop_phase := 0.0
+var sink := "counter"
 
 
 func setup(w: Node, r: String, idx: int) -> Worker:
@@ -101,6 +102,19 @@ func _lumberjack(delta: float) -> void:
 					state = "idle"
 				elif not world.pile_put_from(back):
 					_go_sell()     # pile filled up while unloading: sell the rest
+		"to_station":
+			if walk(delta):
+				state = "feed"
+				timer = 0.0
+		"feed":
+			timer -= delta
+			rig.play("idle")
+			if timer <= 0.0:
+				timer = 0.12
+				if back.count() == 0:
+					state = "idle"
+				elif not world.specials.log_put(back):
+					_deliver(true)
 		"to_truck":
 			if walk(delta):
 				state = "sell"
@@ -114,13 +128,25 @@ func _lumberjack(delta: float) -> void:
 					state = "idle"
 
 
-## Kitchen needs wood → woodpile; woodpile full → sell at the truck.
-func _deliver() -> void:
-	if world.pile_full():
-		_go_sell()
+## Kitchen needs wood → woodpile; a cold lodge fireplace gets logs first once the pile has some;
+## woodpile full → the timber raft (3x) if there is one, else sell at the truck.
+func _deliver(skip_station := false) -> void:
+	var sp: Specials = world.specials
+	if not skip_station and sp.type == "fireplace" and sp.log_need() > 0 and int(Game.sp.get("fuel", 0)) < 6 and Game.woodpile >= 6:
+		_go_station()
+	elif world.pile_full():
+		if not skip_station and sp.type == "raft" and sp.log_need() > 0:
+			_go_station()
+		else:
+			_go_sell()
 	else:
 		state = "to_pile"
 		go([world.pile_zone.global_position + Vector3(0.6, 0, -0.5)])
+
+
+func _go_station() -> void:
+	state = "to_station"
+	go([world.specials.log_pos() + Vector3(0.3 * fire_index, 0, -0.4 + 0.4 * fire_index)])
 
 
 func _go_sell() -> void:
@@ -148,7 +174,11 @@ func _waiter(delta: float) -> void:
 					world.rack_take_to(hands)
 				elif hands.count() >= carry or (hands.count() > 0 and Game.rack == 0):
 					state = "to_counter"
-					go([world.serve_zone.global_position + Vector3(-0.6 + fire_index * 1.2, 0, 0)])
+					sink = world.waiter_sink(fire_index)
+					if sink == "special":
+						go([world.specials.dish_pos() + Vector3(0.4 - fire_index * 0.8, 0, 0)])
+					else:
+						go([world.serve_zone.global_position + Vector3(-0.6 + fire_index * 1.2, 0, 0)])
 		"to_counter":
 			if walk(delta):
 				state = "drop"
@@ -159,6 +189,11 @@ func _waiter(delta: float) -> void:
 				timer = 0.15
 				if hands.count() == 0:
 					state = "idle"
+				elif sink == "special":
+					if not world.specials.dish_put(hands):
+						sink = "counter"       # station filled up (or the van left): finish at the counter
+						state = "to_counter"
+						go([world.serve_zone.global_position + Vector3(-0.6 + fire_index * 1.2, 0, 0)])
 				elif not world.counter_put_from(hands):
 					rig.play("carry_idle")
 

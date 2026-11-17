@@ -33,7 +33,9 @@ func _run() -> void:
 	for i in 5: await process_frame
 	await _ready_scene()
 	ok(g.venue == 1, "now at venue 2")
-	ok(g.built.is_empty() and g.crew.lumberjack == 0, "chapter 2 starts fresh")
+	ok(g.built.keys() == ["campfire"] and g.crew.lumberjack == 1 and g.woodpile >= 6, "chapter 2 head start: cooker + 1 lumberjack + firewood")
+	ok(g.special_type() == "drive_thru" and g.build_def("special").cost == 1400, "chapter 2 has a drive-thru pad (cost x4)")
+	ok("special" in g.build_def("gate").requires, "chapter 2 gate needs the drive-thru")
 	ok(g.levels.fire == 0 and g.levels.menu == 0, "kitchen levels are per venue")
 	ok(g.build_def("campfire").name == "Burger grill" and int(g.build_def("campfire").cost) == 96, "chapter 2 config themed + scaled (%s %s)" % [g.build_def("campfire").name, g.build_def("campfire").cost])
 	ok(current_scene.world.theme == g.chapters[1].theme, "world uses chapter 2 theme")

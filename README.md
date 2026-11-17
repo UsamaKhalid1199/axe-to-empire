@@ -15,18 +15,26 @@ Godot 4.7.2, GDScript, `gl_compatibility` renderer. Tuned for low-end phones (Po
 3. Build pads (tables, tool shed, crew cabin, second cooker), buy tool/bag/boots and kitchen upgrades.
 4. Hire lumberjacks (they sell surplus wood at the truck when the pile is full), waiters and cooks.
 5. Meet the gate checklist (builds, guests served, rating, coins) to unlock the next venue. Use the **MAP**
-   button to travel. Crews at venues you leave keep earning at 50%.
+   button to travel. Crews at venues you leave keep earning at 50%. While the game is closed, hired crews earn
+   at 50% for the time you were actually away (up to 2 hours); no crew, no away earnings.
 
-| # | Venue | Product | Cooker | Cost scale |
-|---|---|---|---|---|
-| 1 | Forest Camp | Grilled corn | Firepit | x1 |
-| 2 | Roadside Shack | Burgers | Grill | x4 |
-| 3 | Lakeside Diner | Fish & chips | Fryer | x14 |
-| 4 | Mountain Lodge | Pizza | Oven | x45 |
-| 5 | Autumn Smokehouse | Ribs | Smoker | x140 |
-| 6 | Grand Timber Hotel | Steak | Grill | x420 |
+| # | Venue | Product | Cooker | Signature station (new mechanic) | Cost scale |
+|---|---|---|---|---|---|
+| 1 | Forest Camp | Grilled corn | Firepit | (none: learn the basic loop) | x1 |
+| 2 | Roadside Shack | Burgers | Grill | **Drive-thru window**: cars queue on the road, hand dishes through the window, they pay 1.5x by card | x4 |
+| 3 | Lakeside Diner | Fish & chips | Fryer | **Timber raft**: load logs, it sails to the sawmill and pays 3x the truck price | x14 |
+| 4 | Mountain Lodge | Pizza | Oven | **Lodge fireplace**: burns a log every 6 s; while lit, guests pay +50% and wait longer | x45 |
+| 5 | Autumn Smokehouse | Ribs | Smoker | **Fair bell**: ring it for a 30 s rush (3x guests, 2x prices), then a 75 s cooldown | x140 |
+| 6 | Grand Timber Hotel | Steak | Grill | **Room-service van**: load dishes, it delivers them for 2x; ~1 in 6 guests is a VIP (bigger order, 3x pay, less patient) | x420 |
 
-Each chapter has its own theme (sky, sun, grass, foliage season, building colours, a lake for chapter 3).
+The signature station is an extra build pad (base cost 350 x chapter scale) and the gate needs it. Crews use it
+too (waiters fill the drive-thru/van, lumberjacks feed the fireplace and send surplus wood on the raft), and a
+built station raises that venue's crew income (+25-40%), including in the background. Each chapter also has its
+own theme (sky, sun, grass, foliage season, building colours, a lake for chapter 3) and props (tent, gas pump,
+rowboat, snowman and skis, hay and pumpkins, hotel planters) plus a road sign with the venue name.
+
+Arriving at a new venue for the first time, the crew you bring sets up the cooker, one lumberjack comes along and
+there are 12 logs on the pile. Tools, bag and boots carry over between venues; buildings, kitchen and crew are per venue.
 
 ## Layout
 
@@ -36,7 +44,7 @@ Each chapter has its own theme (sky, sun, grass, foliage season, building colour
 | `data/chapters.json` | Chapter names, products, build names, themes and the growth multipliers |
 | `scripts/core/game_state.gd` | Autoload `Game`: economy, chapter config scaling, per-venue state, empire income, prestige, save/load + migration, offline earnings, jobs |
 | `scripts/main.gd` | Boot, threaded preloading, staged venue build behind the loading screen, travel, graphics quality + auto downgrade |
-| `scripts/world/` | World build, player, crew/customers, trees, procedural art, character rig (two-hand chainsaw IK) |
+| `scripts/world/` | World build, player, crew/customers, trees, procedural art, character rig (two-hand chainsaw IK), `specials.gd` (each chapter's signature station) |
 | `scripts/ui/` | HUD, modals (shop, crew, gate, chapter complete, empire map, settings), loading screen, UI shapes |
 | `shaders/` | Ground, foliage (+ see-through variant for trees covering the player), UI |
 | `tests/` | Headless and rendered test scripts (below) |
@@ -51,8 +59,10 @@ $G --headless --path . --script res://tests/autoplay.gd -- 8 60 0   # bot plays 
 $G --headless --path . --script res://tests/lumbertest.gd           # lumberjacks sell surplus wood
 $G --headless --path . --script res://tests/regrowtest.gd           # stumps wait until the player leaves
 $G --headless --path . --script res://tests/harvtest.gd             # ride the harvester in the forest, walk in camp
+$G --headless --path . --script res://tests/specialtest.gd -- 1     # signature station of chapter 1..5 (player + crew)
 $G --headless --path . --script res://tests/crewzone.gd -- 2        # crew zone opens its menu in chapter 2
 $G --path . --resolution 720x1280 --script res://tests/uishot2.gd -- <outdir>   # empire / gate / complete modals
+$G --path . --resolution 540x960 --script res://tests/chaptershot.gd -- <out.png> <chapter> sp   # frame a chapter's station
 ```
 
 Bot pacing (gate reached, game minutes at 8x): chapter 1 ~49, chapter 2 ~56, chapter 3 ~51. The bot buys every
