@@ -21,6 +21,7 @@ var modal_kind := ""
 var _coin_shown := 0.0
 var _toast_q: Array = []
 var _toast_t := 0.0
+var _toast_tw: Tween
 var _confirm_reset := false
 var _confirm_prestige := false
 var fps_label: Label
@@ -322,7 +323,10 @@ func _process(delta: float) -> void:
 		_toast_holder.position.y = ty
 		toast_box.pivot_offset = toast_box.size * 0.5
 		_toast_t = 2.2 + 0.03 * maxf(0.0, toast_label.text.length() - 30.0)
+		if _toast_tw:
+			_toast_tw.kill()
 		var tw := create_tween()
+		_toast_tw = tw
 		toast_box.modulate.a = 0.0
 		toast_box.scale = Vector2(0.8, 0.8)
 		tw.tween_property(toast_box, "modulate:a", 1.0, 0.15)
@@ -366,6 +370,8 @@ func open_modal(kind: String) -> void:
 	if modal:
 		modal.queue_free()
 	modal_kind = kind
+	if kind == "gate":
+		_drop_fence_toast()
 	joy.release()
 	joy.blocked = true
 	world.player.input_dir = Vector2.ZERO
@@ -402,6 +408,17 @@ func open_modal(kind: String) -> void:
 	Sfx.play("pop", -10.0, 1.3)
 
 
+## The gate prompt says what the "... is for sale" toast said (pushing on the fence, then stopping, gave both):
+## the toast goes as the prompt opens, and queued ones are dropped.
+func _drop_fence_toast() -> void:
+	_toast_q = _toast_q.filter(func(t): return not String(t).contains("for sale"))
+	if toast_label.text.contains("for sale") and _toast_t > 0.0:
+		if _toast_tw:
+			_toast_tw.kill()
+		toast_box.modulate.a = 0.0
+		_toast_t = 0.0
+
+
 func close_modal() -> void:
 	if modal:
 		var m := modal
@@ -418,6 +435,10 @@ func close_modal() -> void:
 	_confirm_prestige = false
 	if _story_q.is_empty():
 		_story_replay = false
+	if _bd_after_story:
+		_bd_after_story = false
+		world.start_big_day()
+		return          # the rest of the queue waits (the Big Day is on)
 	if not _story_q.is_empty():
 		_next_story.call_deferred()
 	elif Game.offline_reward > 0:
@@ -481,8 +502,8 @@ func _rebuild_modal() -> void:
 
 func _rebuild_modal_now() -> void:
 	_rebuild_queued = false
-	if modal == null:
-		return
+	if modal == null or not is_inside_tree():
+		return          # (the HUD is being swapped out: a queued card or rebuild waits for the next one)
 	var old := modal.get_node_or_null("Card")
 	var scroll := -1
 	if old:
@@ -665,7 +686,7 @@ func _gear_rows(v: VBoxContainer, at_shop: bool) -> void:
 		_row(v, TOOL_ICONS[nt.id], nt.name, nt.desc, "Now: " + String(cur.name), _price_button(int(nt.cost), func(): Game.buy_upgrade("tool")))
 	var tracks := [
 		["bag", "bag", "Backpack", "Carry more logs per trip", func(d): return "%d logs" % int(d.cap)],
-		["boots", "boots", "Trail boots", "Run faster", func(d): return "+%d%% speed" % int(round((float(d.mult) - 1.0) * 100))],
+		["boots", "boots", "Trail boots", "Run faster", func(d): return "+%d%% speed" % int(round((float(d.mult) - 1.0) * 100)) if float(d.mult) > 1.001 else "Base speed"],
 	]
 	var pro_txt := {"bag": func(n): return "%d logs" % (int(Game.cfg.bag[Game.cfg.bag.size() - 1].cap) + 6 * n),
 		"boots": func(n): return "+%d%% speed" % int(round((float(Game.cfg.boots[Game.cfg.boots.size() - 1].mult) - 1.0 + 0.04 * n) * 100))}
@@ -695,7 +716,7 @@ func _crew(v: VBoxContainer) -> void:
 		var btn := _price_button(cost, func(): Game.hire(role)) if cost >= 0 else _price_button(0, Callable(), "FULL")
 		_row(v, role, c.name, c.desc, "Hired %d / %d" % [have, int(c.max)], btn)
 	var rate := Game.passive_rate()
-	var note := ("Crew income: %s / min while you play. When you're next door, it waits on this counter." % UI.cash(rate * 60.0)) if rate > 0 else "Hire a lumberjack and a waiter. They keep this place earning while you play, even when you're next door."
+	var note := ("Crew income: %s while you play. When you're next door, it waits on this counter." % _per_min(rate * 60.0)) if rate > 0 else "Hire a lumberjack and a waiter. They keep this place earning while you play, even when you're next door."
 	var l := UI.label(note, 21, UI.MUTED, null, HORIZONTAL_ALIGNMENT_CENTER)
 	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	v.add_child(l)
@@ -822,9 +843,8 @@ Serve %d guests in %d:%02d. More than %d walkouts and it's over. %s" % [String(b
 		var sb := UI.button((("REPLAY FOR STAR 3" if replay else "START " + String(bdd.name).to_upper())) if cool <= 0.0 else "Ready again in %ds" % ceili(cool), "gold", "bigday", 30)
 		sb.disabled = cool > 0.0
 		sb.pressed.connect(func():
-			if world.start_big_day():
-				close_modal()
-				Game.fire_story("bigday_start"))
+			close_modal()
+			_begin_big_day())
 		v.add_child(sb)
 	if Game.chapter_done:
 		# road already open: send the player on (or to the New Empire screen in the last chapter)
@@ -977,6 +997,11 @@ func _empire(v: VBoxContainer) -> void:
 			var st: Array = Game.stars(k)
 			stat += "   " + "".join(st.map(func(x): return "★" if x else "☆"))
 		_row(list, "lock" if k >= Game.unlocked else "star", "%d. %s" % [k + 1, ch.name], desc, stat, btn, extra)
+		if k < Game.unlocked and not Game.stars(k).has(true):
+			# no star earned there yet: a dim, greyed star instead of the big gold one
+			var row_icon: Array = list.get_child(list.get_child_count() - 1).find_children("*", "TextureRect", true, false)
+			if not row_icon.is_empty():
+				row_icon[0].modulate = Color(0.55, 0.55, 0.6, 0.35)
 	if Game.prestige > 0:
 		v.add_child(UI.label("Empire %d · income x%.1f" % [Game.prestige + 1, Game.income_mult()], 22, UI.GOLD_LIGHT, null, HORIZONTAL_ALIGNMENT_CENTER))
 	var cb := UI.button("CLOSE", "dark", "", 28)
@@ -1286,6 +1311,27 @@ func _on_story(beats: Array) -> void:
 		_next_story.call_deferred()
 
 
+## START on the gate prompt. The "bigday_start" story card (if any) shows at once, before the clock runs, and the
+## Big Day starts when it is closed: queued behind the 45 s card spacing it used to pop up mid-rush.
+var _bd_after_story := false
+
+
+func _begin_big_day() -> void:
+	if world.bd_active or _bd_after_story:
+		return
+	var before := _story_q.duplicate()
+	_story_q.clear()
+	Game.fire_story("bigday_start")      # -> _on_story (when story cards are on and this one is unseen)
+	var fresh := _story_q.duplicate()
+	_story_q = fresh + before
+	if fresh.is_empty() or modal_kind != "":
+		world.start_big_day()
+		return
+	_bd_after_story = true
+	_story_replay = false
+	open_modal("story")
+
+
 ## Lines in a row by the same speaker become one card.
 func _merge_beats(beats: Array) -> Array:
 	var out: Array = []
@@ -1303,7 +1349,7 @@ func _merge_beats(beats: Array) -> Array:
 ## not walking, and at most one card per STORY_GAP_S of play. Polled from _tick_overlays, so a card
 ## that has to wait simply shows later.
 func _next_story() -> void:
-	if _story_q.is_empty() or modal_kind != "":
+	if _story_q.is_empty() or modal_kind != "" or not is_inside_tree():
 		return
 	if not _story_replay:
 		if joy.active or _fingers > 0 or Time.get_ticks_msec() - _ui_tap_ms < STORY_TAP_GUARD_MS:
@@ -1360,7 +1406,7 @@ func _station_effect(key: String, lv: int) -> String:
 	match key:
 		"fire": return "%.1fs per dish" % Game.kitchen_cook(Game.cfg, lv)
 		"menu": return "%s a dish" % UI.cash(roundf(Game.menu_price(Game.cfg, lv) * Game.sign_price() * Game.income_mult() * Game.star_mult()))
-		"dining": return ("+%d%% patience, " % (3 * lv) if lv > 0 else "") + "%d%% tips" % int(round((float(Game.cfg.customers.seated_tip) + 0.03 * lv) * 100))
+		"dining": return "%d%% tips" % int(round((float(Game.cfg.customers.seated_tip) + 0.03 * lv) * 100)) + (", +%d%% patience" % (3 * lv) if lv > 0 else "")
 		"sign": return "+%d%% guests, +%d%% price" % [4 * lv, 2 * lv] if lv > 0 else "Base guests and price"
 		"station": return ("+%d%% station pay" % (4 * lv) if lv > 0 else "Base pay") + (" · crew helps" if lv >= 4 else "")
 	return ""
@@ -1410,6 +1456,9 @@ func _upgrades(v: VBoxContainer) -> void:
 			if lock.length() >= 14:
 				stat += "\n" + lock
 		else:
+			if key == "dining":
+				# "25% → 28% tips, +3% patience": the tip share is the number that moves
+				stat = "%d%%" % int(round((float(Game.cfg.customers.seated_tip) + 0.03 * lv) * 100))
 			stat += "  →  " + _station_effect(key, lv + 1)
 			var secs := Game.reno_seconds(lv + 2)
 			if secs > 0:
@@ -1598,7 +1647,7 @@ func _howto(v: VBoxContainer) -> void:
 		["log", "Drop logs on the woodpile; the kitchen cooks with them. Sell extra logs at the truck."],
 		["dish", "Carry dishes from the rack to the counter. Guests pay; collect the cash pile."],
 		["smile", "Serve fast: happy guests pay +20%, guests you serve in person pay +25%. Slow service and they walk out."],
-		["upgrade", "UPGRADE levels the kitchen, menu, dining and signboard up to Lv 25. Big levels take time to build."],
+		["upgrade", "UPGRADE levels the kitchen, menu, dining, signboard and each place's signature station (drive-thru, raft, fireplace...) up to Lv 25. Big levels take time to build."],
 		["crew", "Hire crew to help. They're slower than you, so you earn the most when you serve guests yourself."],
 		["bigday", "Build everything, then win the Big Day at the gate to buy the land next door."],
 		["gate", "It's one road: walk over to your other places, or tap MAP to jump there."],

@@ -117,7 +117,7 @@
         {"t": "build", "id": "special", "r": 8},
         {"t": "level", "id": "kitchen", "n": 4, "r": 6},
         {"t": "build", "id": "crew_hut", "r": 6},
-        {"t": "hire", "id": "lumberjack", "r": 8},
+        {"t": "hire", "id": "cook", "r": 8},
         {"t": "golden", "r": 8},
         {"t": "build", "id": "fire_2", "r": 10},
         {"t": "level", "id": "station", "n": 5, "r": 12},

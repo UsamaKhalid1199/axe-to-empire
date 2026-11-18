@@ -96,8 +96,9 @@ func _process(delta: float) -> void:
 			if walk(delta):
 				state = "queue"
 		"queue":
-			if world.modal_kind == "":
-				waited += delta     # patience holds while a modal or story card covers the game
+			if world.modal_kind == "" or world.bd_active:
+				waited += delta     # patience holds while a modal or story card covers the game (not in a Big Day:
+				                    # its clock, spawns and crew keep going, so a menu left open must not help)
 			var front: bool = slot == 0
 			if not bubble.visible:
 				bubble.visible = true

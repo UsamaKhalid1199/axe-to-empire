@@ -471,6 +471,11 @@ func _decor() -> void:
 		plants[key].append(Transform3D(Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3.ONE * rng.randf_range(0.8, 1.3)), p))
 	for key in plants:
 		_scatter_model(key, plants[key])
+	# a low band south of the road (fence and crops, reeds, snow drifts, hay, hedges...): on the road the bottom
+	# third of the screen is that strip. One MultiMesh per prop type (2 draws), static, no shadows.
+	var bx0 := Plot.west(Game.venue) - (0.0 if Plot.neighbour(Game.venue, -1) >= 0 else 12.0)
+	var bx1 := Plot.east(Game.venue) + (0.0 if Plot.neighbour(Game.venue, 1) >= 0 else 12.0)
+	add_child(Plot.band_node(Game.venue, bx0, bx1))
 
 
 ## Batches every mesh of a model into MultiMeshes: one draw per sub-mesh for all copies.
@@ -1017,7 +1022,8 @@ func _spawn_building(id: String, animate: bool) -> void:
 			root.add_child(axe)
 			_zone("shop", "shop", PADS.shop, Vector2(1.9, 1.6), Color("#8EC9FF"), "TOOLS", "res://assets/icons/hammer.svg")
 		"crew_hut":
-			var cab2 := Art.cabin(3.0, 2.4, _tc("wall", Color(1.25, 1.0, 0.78)).darkened(0.08))
+			# its roof dithers out near the camera like the parasols (from the tool shed it filled the bottom half)
+			var cab2 := Art.cabin(3.0, 2.4, _tc("wall", Color(1.25, 1.0, 0.78)).darkened(0.08), true)
 			cab2.position = CREW_POS
 			cab2.rotation.y = -PI / 2
 			root.add_child(cab2)
@@ -1065,8 +1071,9 @@ func _dining_table(c: Vector3, root: Node3D) -> void:
 		root.add_child(t)
 	if style in ["parasol", "round"]:
 		var stripe := _tc("parasol", Color(0.82, 0.16, 0.1))
-		# at the far end of the table so the top-down camera still sees the guests and their food
-		var at := c + Vector3(0, 0, -1.55)
+		# at the far end of the table so the top-down camera still sees the guests and their food; the first table
+		# of the second row has the crew cabin's CREW pad at its north end, so its parasol stands at the south end
+		var at := c + Vector3(0, 0, 1.55 if c.is_equal_approx(TABLES.tables_2[0]) else -1.55)
 		var pole := Art.cylinder(0.04, 2.3, _near_fade(Color(0.9, 0.88, 0.84), 0.4), at + Vector3(0, 1.15, 0), root, 6)
 		pole.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		var cm := CylinderMesh.new()
@@ -1784,6 +1791,16 @@ func _hud_side_shift() -> float:
 	return ground_w * (59.0 / maxf(1.0, vs.x))
 
 
+## Left edge (viewport px) of the HUD's right-hand button column (the screen width without a HUD).
+func _hud_column_left() -> float:
+	var vw := get_viewport().get_visible_rect().size.x
+	var hud = get_parent().get("hud") if get_parent() else null
+	if hud == null or not is_instance_valid(hud) or hud.get("jobs_btn") == null:
+		return vw
+	var col: Control = hud.jobs_btn.get_parent().get_parent()
+	return minf(vw, col.get_global_rect().position.x) if col.is_visible_in_tree() else vw
+
+
 ## Where the camera looks for a player at p. In the camp it is just ahead of the player. On the road and near a
 ## plot edge the steep portrait camera would show mostly empty grass south of the road, so the aim is held at
 ## ROAD_Z - CAM_ROAD_BACK (the road sits in the lower third, the camp and the plot next door fill the rest) and leans a
@@ -1827,6 +1844,11 @@ func _cam_tick(delta: float) -> void:
 	_cam_target = _cam_target.lerp(cam_aim(player.global_position), clampf(delta * 5.0, 0.0, 1.0))
 	_shake = maxf(0.0, _shake - delta)
 	_place_cam(clampf(delta * 8.0, 0.0, 1.0))
+	# the neighbours' road labels stay between the screen edge and the HUD's button column
+	var col_l := _hud_column_left()
+	for side in nb_plots:
+		if is_instance_valid(nb_plots[side]):
+			nb_plots[side].place_label(cam, col_l)
 	# see-through foliage around the player
 	var head := player.global_position + Vector3(0, 1.0, 0)
 	if not cam.is_position_behind(head):

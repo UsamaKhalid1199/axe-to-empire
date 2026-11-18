@@ -280,3 +280,134 @@ static func lake_node() -> MeshInstance3D:
 	w.position.y = 0.04
 	w.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	return w
+
+
+# ------------------------------------------------------------------ the low band south of the road
+
+const BAND_Z := Vector2(14.5, 20.6)    # from inside the road wall (z 14..15) south: nobody walks there
+
+
+## The low dressing south of the road for chapter k over x0..x1 (that plot's own coordinates): a fence, hedge or
+## hay line along the road wall and crops, flower beds, reeds, snow drifts, pumpkins or parked cars behind it.
+## Everything is under ~0.6 m (it sits right under the camera and must never hide the player).
+## Returns [[mesh, [Transform3D, ...]], ...]: one entry per prop type, i.e. one MultiMesh (one draw) each.
+static func band(k: int, x0: float, x1: float) -> Array:
+	var id := String(Game.chapters[k].get("id", ""))
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 4242 + k * 17 + int(x0 * 3.0)
+	var a: Array = []
+	var b: Array = []
+	var ka := ""
+	var kb := ""
+	match id:
+		"camp", "shack":
+			ka = "fence"
+			a = _band_line(x0, x1, 2.0, 14.55, 0.0)
+			if id == "camp":
+				kb = "flowers"
+				for r in 3:
+					var x := x0 + 1.3 + (1.25 if r % 2 == 1 else 0.0)
+					while x < x1 - 1.0:
+						if rng.randf() > 0.18:
+							b.append(Transform3D(Basis(), Vector3(x + rng.randf_range(-0.2, 0.2), 0, 15.6 + r * 1.35)))
+						x += 2.5
+			else:
+				kb = "crops"
+				for r in 6:
+					b.append_array(_band_line(x0, x1, 2.0, 15.3 + r * 0.8, 0.0))
+		"lake":
+			ka = "reeds"
+			kb = "rocks"
+			for i in int((x1 - x0) * 2.6):
+				var z := 14.6 + pow(rng.randf(), 1.6) * 5.0        # thicker near the road
+				var s := rng.randf_range(0.75, 1.25)
+				a.append(Transform3D(Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3(s, rng.randf_range(0.85, 1.05), s)),
+					Vector3(rng.randf_range(x0 + 0.4, x1 - 0.4), 0, z)))
+			for i in int((x1 - x0) * 0.22):
+				var s := rng.randf_range(0.7, 1.3)
+				b.append(Transform3D(Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3.ONE * s),
+					Vector3(rng.randf_range(x0 + 0.5, x1 - 0.5), 0, rng.randf_range(14.8, 19.5))))
+		"lodge":
+			ka = "drift"
+			kb = "skis"
+			for i in int((x1 - x0) * 1.1):
+				var w := rng.randf_range(0.45, 1.0)
+				a.append(Transform3D(Basis(Vector3.UP, rng.randf_range(-0.3, 0.3)).scaled(Vector3(w, rng.randf_range(0.8, 1.4), w * 0.6)),
+					Vector3(rng.randf_range(x0 + 0.6, x1 - 0.6), 0, rng.randf_range(14.7, 20.0))))
+			var x := x0 + 2.5
+			while x < x1 - 1.5:
+				b.append(Transform3D(Basis(Vector3.UP, rng.randf_range(-0.12, 0.12)), Vector3(x + rng.randf_range(-0.8, 0.8), 0, 14.95)))
+				x += rng.randf_range(3.0, 4.6)
+		"smoke":
+			ka = "hay"
+			kb = "pumpkins"
+			var x := x0 + 1.2
+			while x < x1 - 0.8:
+				a.append(Transform3D(Basis(Vector3.UP, rng.randf_range(-0.25, 0.25)), Vector3(x, 0, 14.75)))
+				if rng.randf() < 0.35:
+					a.append(Transform3D(Basis(Vector3.UP, PI / 2 + rng.randf_range(-0.3, 0.3)), Vector3(x + 0.2, 0, 15.7)))
+				x += rng.randf_range(1.6, 2.8)
+			for r in 4:
+				for t in _band_line(x0, x1, 2.0, 16.5 + r * 0.85, 0.0):
+					if rng.randf() > 0.12:
+						b.append(t)
+		"hotel":
+			ka = "hedge"
+			kb = "cars"
+			a = _band_line(x0, x1, 2.0, 14.6, 0.0)
+			for z in [16.6, 19.3]:
+				var x := x0 + 1.6
+				while x < x1 - 1.4:
+					if rng.randf() < 0.75:
+						b.append(Transform3D(Basis(Vector3.UP, PI if rng.randf() < 0.5 else 0.0), Vector3(x, 0, z)))
+					x += 2.76
+	var out: Array = []
+	if ka != "" and not a.is_empty():
+		out.append([Art.band_mesh(ka), a])
+	if kb != "" and not b.is_empty():
+		out.append([Art.band_mesh(kb), b])
+	return out
+
+
+## Pieces of length `step` end to end along x (centred), from x0 to x1 at depth z.
+static func _band_line(x0: float, x1: float, step: float, z: float, yaw: float) -> Array:
+	var out: Array = []
+	var n := int(floor((x1 - x0) / step))
+	var start := (x0 + x1) * 0.5 - (n - 1) * step * 0.5
+	for i in n:
+		out.append(Transform3D(Basis(Vector3.UP, yaw), Vector3(start + i * step, 0, z)))
+	return out
+
+
+## The band as a node of MultiMeshes (static, no shadows: one draw per prop type).
+static func band_node(k: int, x0: float, x1: float) -> Node3D:
+	var n := Node3D.new()
+	n.name = "RoadBand"
+	for e in band(k, x0, x1):
+		var xfs: Array = e[1]
+		var mm := MultiMesh.new()
+		mm.transform_format = MultiMesh.TRANSFORM_3D
+		mm.mesh = e[0]
+		mm.instance_count = xfs.size()
+		for i in xfs.size():
+			mm.set_instance_transform(i, xfs[i])
+		var mmi := MultiMeshInstance3D.new()
+		mmi.multimesh = mm
+		mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		n.add_child(mmi)
+	return n
+
+
+## The band merged into one plain mesh per prop type, for a neighbour's flat bake (Art.bake_flat folds them into
+## its baked mesh: no extra draws there).
+static func band_meshes(k: int, x0: float, x1: float, parent: Node3D) -> void:
+	for e in band(k, x0, x1):
+		var st := SurfaceTool.new()
+		st.begin(Mesh.PRIMITIVE_TRIANGLES)
+		for xf in e[1]:
+			st.append_from(e[0], 0, xf)
+		var mi := MeshInstance3D.new()
+		mi.mesh = st.commit()
+		mi.mesh.surface_set_material(0, Art.band_mat())
+		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		parent.add_child(mi)

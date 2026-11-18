@@ -335,8 +335,8 @@ func _tick_drive(delta: float) -> void:
 				if c.x <= tx + 0.01 and slot == 0:
 					c.state = "wait"
 			"wait":
-				if world.modal_kind == "":
-					c.waited += delta      # drive-thru patience holds under a modal too
+				if world.modal_kind == "" or world.bd_active:
+					c.waited += delta      # drive-thru patience holds under a modal too (not in a Big Day)
 				c.t -= delta
 				if c.t <= 0.0 and kiosk_stack.count() > 0:
 					c.t = 0.22

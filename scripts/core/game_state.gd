@@ -67,7 +67,8 @@ var mute := false
 ## Player settings beyond sound on/off.
 var settings := {"music": true, "sfx": true, "vibration": true, "show_fps": false, "story": true}
 ## Player profile: wardrobe (owned / equipped outfit pieces), name. See scripts/core/wardrobe.gd.
-var profile := {"owned": ["shirt_orange", "hat_none", "hat_hardhat", "pants_dark"], "equipped": {"shirt": "shirt_orange", "hat": "hat_hardhat", "pants": "pants_dark"}}
+const DEFAULT_PROFILE := {"owned": ["shirt_orange", "hat_none", "hat_hardhat", "pants_dark"], "equipped": {"shirt": "shirt_orange", "hat": "hat_hardhat", "pants": "pants_dark"}}
+var profile := DEFAULT_PROFILE.duplicate(true)
 signal profile_changed
 ## Graphics: 0 smooth, 1 balanced, 2 beautiful. quality_auto lets the game drop a level when fps stays low.
 var quality := 1
@@ -631,6 +632,15 @@ func reno_rush() -> bool:
 
 
 func _reno_tick() -> void:
+	var t := now()
+	for k in venues.size():
+		if k == venue or not (venues[k] is Dictionary):
+			continue
+		var r: Dictionary = venues[k].get("reno", {})
+		if not r.is_empty() and t >= int(r.get("end", 0)):
+			venues[k][String(r.id)] = int(r.to)
+			venues[k]["reno"] = {}
+			_rates_t = 0.0                # that place's background income goes up now
 	if reno.is_empty() or reno_left() > 0:
 		return
 	var key: String = reno.id
@@ -1067,7 +1077,7 @@ func claim_job(i: int) -> void:
 	j.claimed = true
 	add_coins(int(j.reward), false)
 	if jobs.all(func(x): return x.claimed):
-		var today := _today()
+		var today := jobs_day if jobs_day != "" else _today()
 		if streak_last_day != today:
 			streak = (streak % 7) + 1
 			streak_last_day = today
@@ -1091,7 +1101,7 @@ func claim_chest() -> void:
 	if chest_claimed or not jobs.all(func(x): return x.claimed):
 		return
 	chest_claimed = true
-	chest_day = _today()
+	chest_day = jobs_day if jobs_day != "" else _today()
 	add_coins(streak_reward(), false)
 	jobs_changed.emit()
 	save_game()
@@ -1293,5 +1303,8 @@ func reset_all() -> void:
 	reno = {}; bigday = {}; seen = {}; task_i = 0; task_base = 0; golden_n = 0; walkouts = 0; _star_cache = 0
 	levels = {"tool": 0, "bag": 0, "boots": 0, "fire": 0, "menu": 0, "dining": 0, "sign": 0, "station": 0}
 	pro = {"tool": 0, "bag": 0, "boots": 0}
+	profile = DEFAULT_PROFILE.duplicate(true); profile_changed.emit()
+	streak = 0; streak_last_day = ""; chest_day = ""; chest_claimed = false
+	offline_reward = 0
 	jobs_day = ""; refresh_jobs()
 	save_game()        # write the fresh game now, so a relaunch doesn't fall back to the recovery copy

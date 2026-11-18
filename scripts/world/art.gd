@@ -801,11 +801,20 @@ static func rack() -> Node3D:
 	return n
 
 
-static func cabin(w: float, d: float, wall: Color) -> Node3D:
+## `near_fade`: the roof dithers out within ~10 m of the camera (like world._near_fade), for a cabin that stands
+## between the camera and where the player works.
+static func cabin(w: float, d: float, wall: Color, near_fade := false) -> Node3D:
 	var n := Node3D.new()
 	var m := pbr("wood_planks_grey", 1.0, wall)
 	box(Vector3(w, 1.9, d), m, Vector3(0, 0.95, 0), n)
 	var roof := pbr("bark_brown_02", 2.0, Color(0.75, 0.6, 0.5))
+	if near_fade:
+		roof = _c("roof_nearfade", func():
+			var rm: StandardMaterial3D = pbr("bark_brown_02", 2.0, Color(0.75, 0.6, 0.5)).duplicate()
+			rm.distance_fade_mode = BaseMaterial3D.DISTANCE_FADE_PIXEL_DITHER
+			rm.distance_fade_min_distance = 8.4      # a bit further out than the parasols: the roof is wide, and from
+			rm.distance_fade_max_distance = 10.4     # the tool shed it starts ~8.6 m from the camera
+			return rm)
 	var a := 0.5
 	for s in [-1.0, 1.0]:
 		var r := box(Vector3(w + 0.5, 0.12, (d * 0.5 + 0.35) / cos(a)), roof, Vector3(0, 1.9 + d * 0.25 * tan(a) + 0.02, s * d * 0.25), n)
@@ -844,3 +853,165 @@ static func arch(text: String) -> Node3D:
 	n.add_child(l)
 	merge_static(n)
 	return n
+
+
+# ------------------------------------------------------------------ the low band south of the road
+
+## Shared vertex-coloured material of the road-side band props (Plot.band). Vertex colours are stored linear, so
+## the neighbours' flat bake (which reads them as linear too) shows the same colours. No textures, no shadows.
+static func band_mat() -> StandardMaterial3D:
+	return _c("band_mat", func():
+		var m := StandardMaterial3D.new()
+		m.vertex_color_use_as_albedo = true
+		m.roughness = 0.9
+		return m)
+
+
+## A box into `st` placed by `xf` (rotations allowed), colour given in sRGB.
+static func _bbox(st: SurfaceTool, size: Vector3, xf: Transform3D, col: Color) -> void:
+	var h := size * 0.5
+	var lc := col.srgb_to_linear()
+	var faces := [
+		[Vector3.UP, [Vector3(-h.x, h.y, -h.z), Vector3(h.x, h.y, -h.z), Vector3(h.x, h.y, h.z), Vector3(-h.x, h.y, h.z)]],
+		[Vector3.DOWN, [Vector3(-h.x, -h.y, h.z), Vector3(h.x, -h.y, h.z), Vector3(h.x, -h.y, -h.z), Vector3(-h.x, -h.y, -h.z)]],
+		[Vector3.FORWARD, [Vector3(h.x, -h.y, -h.z), Vector3(h.x, h.y, -h.z), Vector3(-h.x, h.y, -h.z), Vector3(-h.x, -h.y, -h.z)]],
+		[Vector3.BACK, [Vector3(-h.x, -h.y, h.z), Vector3(-h.x, h.y, h.z), Vector3(h.x, h.y, h.z), Vector3(h.x, -h.y, h.z)]],
+		[Vector3.LEFT, [Vector3(-h.x, -h.y, -h.z), Vector3(-h.x, h.y, -h.z), Vector3(-h.x, h.y, h.z), Vector3(-h.x, -h.y, h.z)]],
+		[Vector3.RIGHT, [Vector3(h.x, -h.y, h.z), Vector3(h.x, h.y, h.z), Vector3(h.x, h.y, -h.z), Vector3(h.x, -h.y, -h.z)]],
+	]
+	for f in faces:
+		var v: Array = f[1]
+		var n: Vector3 = (xf.basis * f[0]).normalized()
+		for idx in [0, 1, 2, 0, 2, 3]:
+			st.set_color(lc)
+			st.set_normal(n)
+			st.add_vertex(xf * v[idx])
+
+
+## A surface of revolution around local +Y: `prof` = [Vector2(radius, y), ...] from the bottom up. sRGB colour.
+static func _lathe(st: SurfaceTool, prof: Array, seg: int, xf: Transform3D, col: Color) -> void:
+	var lc := col.srgb_to_linear()
+	for j in prof.size() - 1:
+		var a: Vector2 = prof[j]
+		var b: Vector2 = prof[j + 1]
+		var e := b - a
+		var nn := Vector2(e.y, -e.x).normalized()        # outward in the (radius, y) plane
+		for i in seg:
+			var a0 := TAU * i / seg
+			var a1 := TAU * (i + 1) / seg
+			var p := [Vector3(cos(a0) * a.x, a.y, sin(a0) * a.x), Vector3(cos(a1) * a.x, a.y, sin(a1) * a.x),
+				Vector3(cos(a1) * b.x, b.y, sin(a1) * b.x), Vector3(cos(a0) * b.x, b.y, sin(a0) * b.x)]
+			var n := [Vector3(cos(a0) * nn.x, nn.y, sin(a0) * nn.x), Vector3(cos(a1) * nn.x, nn.y, sin(a1) * nn.x),
+				Vector3(cos(a1) * nn.x, nn.y, sin(a1) * nn.x), Vector3(cos(a0) * nn.x, nn.y, sin(a0) * nn.x)]
+			for q in [0, 1, 2, 0, 2, 3]:
+				st.set_color(lc)
+				st.set_normal((xf.basis * n[q]).normalized())
+				st.add_vertex(xf * p[q])
+
+
+static func _at(x: float, y: float, z: float, rot := Vector3.ZERO) -> Transform3D:
+	return Transform3D(Basis.from_euler(rot), Vector3(x, y, z))
+
+
+## One low prop of the band south of the road (all under ~0.6 m so none can hide the player), cached.
+##   fence (a 2 m length)  flowers (a 1.8 m bed)  crops (a 2 m row)  reeds (a clump)  rocks
+##   drift (snow)  skis (a rack)  hay (a bale)  pumpkins (a 2 m row)  hedge (2 m)  cars (two parked cars)
+static func band_mesh(kind: String) -> ArrayMesh:
+	return _c("band:" + kind, func():
+		var st := SurfaceTool.new()
+		st.begin(Mesh.PRIMITIVE_TRIANGLES)
+		var rng := RandomNumberGenerator.new()
+		rng.seed = hash(kind)
+		var wood := Color(0.45, 0.31, 0.19)
+		match kind:
+			"fence":
+				_bbox(st, Vector3(0.1, 0.58, 0.1), _at(-1.0, 0.29, 0), wood.darkened(0.15))
+				_bbox(st, Vector3(0.1, 0.58, 0.1), _at(0.0, 0.29, 0), wood.darkened(0.15))
+				for y in [0.2, 0.44]:
+					_bbox(st, Vector3(2.0, 0.07, 0.045), _at(0.0, y, 0.06), wood)
+			"flowers":
+				var soil := Color(0.3, 0.2, 0.13)
+				_bbox(st, Vector3(1.7, 0.08, 0.6), _at(0, 0.04, 0), soil)
+				for s in [-1.0, 1.0]:
+					_bbox(st, Vector3(1.8, 0.14, 0.06), _at(0, 0.07, s * 0.33), wood)
+					_bbox(st, Vector3(0.06, 0.14, 0.6), _at(s * 0.87, 0.07, 0), wood)
+				var petals := [Color(0.92, 0.2, 0.18), Color(0.98, 0.82, 0.2), Color(0.62, 0.32, 0.8), Color(0.98, 0.96, 0.9),
+					Color(0.95, 0.45, 0.6)]
+				for r in 3:
+					for i in 7:
+						var x := -0.72 + i * 0.24 + rng.randf_range(-0.04, 0.04)
+						var z := (r - 1) * 0.18 + rng.randf_range(-0.03, 0.03)
+						_bbox(st, Vector3(0.15, 0.14, 0.15), _at(x, 0.14, z, Vector3(0, rng.randf() * TAU, 0)), Color(0.22, 0.48, 0.16))
+						_bbox(st, Vector3(0.11, 0.08, 0.11), _at(x, 0.25, z, Vector3(0, rng.randf() * TAU, 0)), petals[(r * 7 + i * 3) % petals.size()])
+			"crops":
+				_bbox(st, Vector3(2.0, 0.1, 0.42), _at(0, 0.05, 0), Color(0.36, 0.25, 0.16))
+				for i in 6:
+					var x := -0.83 + i * 0.333
+					var h := rng.randf_range(0.36, 0.48)
+					var g := Color(0.42, 0.62, 0.2).lerp(Color(0.62, 0.66, 0.24), rng.randf())
+					for a in [0.785, -0.785]:
+						_bbox(st, Vector3(0.34, h, 0.05), _at(x, 0.1 + h * 0.5, 0, Vector3(0, a + rng.randf_range(-0.2, 0.2), 0)), g)
+					_bbox(st, Vector3(0.05, 0.08, 0.05), _at(x, 0.1 + h + 0.03, 0), Color(0.86, 0.74, 0.36))
+			"reeds":
+				_lathe(st, [Vector2(0.3, 0.0), Vector2(0.22, 0.05), Vector2(0.0, 0.07)], 7, Transform3D.IDENTITY, Color(0.45, 0.56, 0.28))
+				for i in 9:
+					var a := TAU * i / 9.0 + rng.randf_range(-0.3, 0.3)
+					var r := rng.randf_range(0.04, 0.2)
+					var h := rng.randf_range(0.34, 0.58)
+					var lean := Vector3(sin(a) * 0.22, 0, -cos(a) * 0.22)
+					var g := Color(0.55, 0.72, 0.3).lerp(Color(0.84, 0.78, 0.46), rng.randf())
+					_bbox(st, Vector3(0.05, h, 0.05), _at(cos(a) * r, h * 0.5, sin(a) * r, lean), g)
+					if i % 3 == 0:
+						_bbox(st, Vector3(0.06, 0.12, 0.06), _at(cos(a) * r + sin(a) * h * 0.21, h - 0.02, sin(a) * r - cos(a) * h * 0.21, lean), Color(0.4, 0.25, 0.14))
+			"rocks":
+				_lathe(st, [Vector2(0.36, 0.0), Vector2(0.34, 0.1), Vector2(0.22, 0.22), Vector2(0.0, 0.26)], 6,
+					_at(0, 0, 0), Color(0.55, 0.55, 0.52))
+				_lathe(st, [Vector2(0.2, 0.0), Vector2(0.18, 0.07), Vector2(0.1, 0.14), Vector2(0.0, 0.16)], 5,
+					_at(0.42, 0, 0.18), Color(0.5, 0.51, 0.48))
+			"drift":
+				_lathe(st, [Vector2(1.0, 0.0), Vector2(0.92, 0.1), Vector2(0.66, 0.24), Vector2(0.32, 0.32), Vector2(0.0, 0.34)], 10,
+					Transform3D.IDENTITY, Color(1.0, 0.99, 0.97))
+			"skis":
+				for x in [-0.72, 0.72]:
+					_bbox(st, Vector3(0.07, 0.56, 0.07), _at(x, 0.28, -0.25), wood)
+				_bbox(st, Vector3(1.55, 0.06, 0.06), _at(0, 0.53, -0.25), wood)
+				_bbox(st, Vector3(1.55, 0.05, 0.05), _at(0, 0.1, -0.25), wood)
+				var cols := [Color(0.85, 0.18, 0.14), Color(0.16, 0.36, 0.75), Color(0.95, 0.75, 0.15), Color(0.18, 0.55, 0.3)]
+				for i in 5:
+					var x := -0.56 + i * 0.28
+					for dx in [-0.045, 0.045]:
+						# leaning back against the top bar: 0.95 m skis, ~0.6 m high
+						_bbox(st, Vector3(0.07, 0.95, 0.025), _at(x + dx, 0.29, 0.1, Vector3(-0.9, 0, 0)), cols[i % cols.size()])
+			"hay":
+				var straw := Color(0.86, 0.7, 0.32)
+				_lathe(st, [Vector2(0.0, -0.42), Vector2(0.27, -0.42), Vector2(0.29, -0.39), Vector2(0.29, 0.39), Vector2(0.27, 0.42),
+					Vector2(0.0, 0.42)], 10, _at(0, 0.29, 0, Vector3(0, 0, PI / 2)), straw)
+				for x in [-0.2, 0.2]:
+					_lathe(st, [Vector2(0.296, -0.02), Vector2(0.296, 0.02)], 10, _at(x, 0.29, 0, Vector3(0, 0, PI / 2)), Color(0.55, 0.4, 0.2))
+			"pumpkins":
+				_bbox(st, Vector3(2.0, 0.04, 0.34), _at(0, 0.02, 0), Color(0.24, 0.4, 0.14))
+				for i in 4:
+					var x := -0.75 + i * 0.5 + rng.randf_range(-0.08, 0.08)
+					var rr := rng.randf_range(0.18, 0.25)
+					var h := rr * 1.5
+					var c := Color(0.93, 0.47, 0.08).lerp(Color(0.85, 0.36, 0.05), rng.randf())
+					_lathe(st, [Vector2(0.0, 0.0), Vector2(rr * 0.7, 0.03), Vector2(rr, h * 0.4), Vector2(rr * 0.95, h * 0.72),
+						Vector2(rr * 0.55, h * 0.97), Vector2(0.0, h)], 8, _at(x, 0, rng.randf_range(-0.06, 0.06)), c)
+					_bbox(st, Vector3(0.04, 0.08, 0.04), _at(x, h + 0.02, 0), Color(0.3, 0.42, 0.14))
+			"hedge":
+				_bbox(st, Vector3(2.0, 0.46, 0.62), _at(0, 0.23, 0), Color(0.16, 0.34, 0.14))
+				_bbox(st, Vector3(1.94, 0.1, 0.52), _at(0, 0.5, 0), Color(0.22, 0.44, 0.17))
+			"cars":
+				var paint := [Color(0.75, 0.14, 0.12), Color(0.18, 0.34, 0.62)]
+				for s in [-1.0, 1.0]:
+					var x: float = s * 0.68
+					_bbox(st, Vector3(0.92, 0.28, 1.95), _at(x, 0.26, 0), paint[int(s > 0.0)])
+					_bbox(st, Vector3(0.8, 0.2, 1.0), _at(x, 0.5, 0.08), Color(0.16, 0.2, 0.24))
+					for wz in [-0.62, 0.62]:
+						for wx in [-0.44, 0.44]:
+							_bbox(st, Vector3(0.12, 0.26, 0.26), _at(x + wx, 0.13, wz), Color(0.08, 0.08, 0.09))
+				for x in [-1.38, 0.0, 1.38]:
+					_bbox(st, Vector3(0.07, 0.012, 2.3), _at(x, 0.006, 0), Color(0.92, 0.92, 0.88))
+		var m := st.commit()
+		m.surface_set_material(0, band_mat())
+		return m)

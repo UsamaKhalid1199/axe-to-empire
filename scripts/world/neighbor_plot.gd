@@ -56,6 +56,8 @@ func _ready() -> void:
 			_new_land(props)
 		else:
 			_for_sale(props)
+		# the low band south of the road, baked in with the rest (no extra draws)
+		Plot.band_meshes(k, minf(near_x, _far_x()), maxf(near_x, _far_x()), props)
 		baked = Art.bake_flat(props)
 		if _bakes.size() > 16:
 			_bakes.clear()
@@ -194,7 +196,7 @@ func _table(r: Node3D, c: Vector3) -> void:
 			for ez in [-0.85, 0.85]:
 				Art.box(Vector3(0.08, 0.64, 0.08), plank, c + Vector3(sx * 0.3, 0.32, ez), r)
 	if style in ["parasol", "round"]:
-		var at := c + Vector3(0, 0, -1.55)
+		var at := c + Vector3(0, 0, 1.55 if c.is_equal_approx(world.TABLES.tables_2[0]) else -1.55)     # = world._dining_table
 		Art.cylinder(0.04, 2.3, Art.paint(Color(0.9, 0.88, 0.84), 0.4), at + Vector3(0, 1.15, 0), r, 6)
 		var cm := CylinderMesh.new()
 		cm.top_radius = 0.05
@@ -415,7 +417,7 @@ func _labels() -> void:
 	# metres beyond the edge, and the HUD's button column covers the right of the screen, so the label is
 	# centred on the edge (the camera leans toward the edge there, see world.cam_aim). The venues' road signs
 	# stand further north (SIGN_AT), clear of it.
-	till_label.position = Vector3(near_x if side < 0 else near_x - 0.6, 3.4, Plot.ROAD_Z - 0.4)
+	till_label.position = _label_home()
 	add_child(till_label)
 	if not visited or not _has("campfire"):
 		return
@@ -447,6 +449,51 @@ func _labels() -> void:
 	add_child(pile_label)
 
 
+func _label_home() -> Vector3:
+	return Vector3(near_x if side < 0 else near_x - 0.6, 3.4, Plot.ROAD_Z - 0.4)
+
+
+var _label_col := Color.WHITE
+var _label_a := 1.0
+const LABEL_MARGIN := 10.0        # screen px kept clear at the screen edge and left of the HUD button column
+
+
+## Keeps the label readable (world._cam_tick, every frame after the camera moved): it is slid along the road
+## (screen-horizontally) so its whole text stays between the left screen edge and the HUD's button column
+## (`hi` = that column's left edge in viewport px), and it fades out the further it had to be pulled in from its
+## spot at the edge, i.e. while the edge itself is still well off screen.
+func place_label(cam: Camera3D, hi: float) -> void:
+	if till_label == null or not is_instance_valid(cam):
+		return
+	till_label.position = _label_home()
+	var c := till_label.global_position
+	if cam.is_position_behind(c):
+		return
+	var right := cam.global_transform.basis.x
+	var cx := cam.unproject_position(c).x
+	var ppm := cam.unproject_position(c + right).x - cx            # screen px per metre at the label
+	if ppm <= 0.01:
+		return
+	var w_px := till_label.font.get_multiline_string_size(till_label.text, HORIZONTAL_ALIGNMENT_CENTER, -1,
+		till_label.font_size).x * till_label.pixel_size * ppm
+	var lo := LABEL_MARGIN + w_px * 0.5
+	var top := hi - LABEL_MARGIN - w_px * 0.5
+	var want := clampf(cx, lo, maxf(lo, top))
+	var shift_m := (want - cx) / ppm
+	if absf(shift_m) > 0.001:
+		till_label.global_position = c + right * shift_m
+	var a := 1.0 - smoothstep(0.8, 2.6, absf(shift_m))
+	if absf(a - _label_a) > 0.01:
+		_label_a = a
+		_apply_label_col()
+
+
+func _apply_label_col() -> void:
+	till_label.visible = _label_a > 0.02
+	till_label.modulate = Color(_label_col, _label_a)
+	till_label.outline_modulate = Color(0.08, 0.05, 0.02, 0.9 * _label_a)
+
+
 const LABEL_PX := 0.0082          # 1.7x the first version: readable on a 720-wide phone
 const LABEL_MAX_W := 3.9           # metres
 
@@ -467,14 +514,15 @@ func refresh() -> void:
 	# the arrow says which way along the road it lies
 	if not owned:
 		text = _cue(nm) + "\nFOR SALE"
-		till_label.modulate = Color(1.0, 0.86, 0.6)
+		_label_col = Color(1.0, 0.86, 0.6)
 	elif not visited:
 		text = _cue("WALK IN") + "\n" + nm
-		till_label.modulate = Color(0.75, 1.0, 0.65)
+		_label_col = Color(0.75, 1.0, 0.65)
 	else:
 		# the cue gets its own line: one "WALK TO <NAME>" line was too wide for a portrait screen
 		text = _cue("WALK TO") + "\n" + nm + ("\n%s waiting" % UI.cash(cash) if cash > 0 else "")
-		till_label.modulate = Color(1, 1, 1)
+		_label_col = Color(1, 1, 1)
+	_apply_label_col()
 	if text != till_label.text:
 		till_label.text = text
 		# long names shrink a little so the label never runs under the HUD buttons or off screen

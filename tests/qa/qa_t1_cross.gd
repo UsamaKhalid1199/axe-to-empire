@@ -151,11 +151,11 @@ func _run() -> void:
 		guard += 1
 	ok(g.coins - c_before == ctr, "collecting pays exactly the counter %d (got %d)" % [ctr, g.coins - c_before])
 
-	# ---------- renovation that finishes while away is applied on return, once
+	# ---------- renovation that finishes while away finishes on time and is kept on return
 	g.reno = {"id": "menu", "end": g.now() + 2, "to": 4}
 	moved = await _cross(1)
 	await _secs(3.0)
-	ok(int(g.venues[1].menu) == 3, "while away the stashed level is unchanged (%d)" % int(g.venues[1].menu))
+	ok(int(g.venues[1].menu) == 4, "while away the renovation still finishes on time (%d)" % int(g.venues[1].menu))
 	moved = await _cross(-1)
 	await _secs(1.5)
 	ok(g.levels.menu == 4 and g.reno.is_empty(), "renovation done on return: menu idx %d, reno %s" % [g.levels.menu, g.reno])
