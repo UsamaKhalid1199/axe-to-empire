@@ -95,6 +95,10 @@ func travel_to(k: int) -> void:
 	var from := Game.venue
 	if from == k or k < 0 or k >= Game.unlocked or crossing:
 		return
+	if world and is_instance_valid(world) and world.bd_active:
+		if hud:
+			hud.show_toast("Finish the Big Day first!")     # leaving would silently drop the Big Day
+		return
 	if world == null or not is_instance_valid(world) or hud == null or get_node_or_null("LoadingScreen") != null:
 		var take := {}
 		if world and is_instance_valid(world):

@@ -398,6 +398,14 @@ static func band(k: int, x0: float, x1: float) -> Array:
 			while x < x1 - 1.5:
 				b.append(Transform3D(Basis(Vector3.UP, rng.randf_range(-0.12, 0.12)), Vector3(x + rng.randf_range(-0.8, 0.8), 0, 14.95)))
 				x += rng.randf_range(3.0, 4.6)
+			# no drift through a ski rack (1.55 x ~0.8 m): keep a drift's edge ~0.25 m clear of it
+			a = a.filter(func(t: Transform3D) -> bool:
+				var rx := t.basis.x.length()
+				var rz := t.basis.z.length()
+				for s in b:
+					if absf(t.origin.x - s.origin.x) < 0.8 + rx + 0.25 and absf(t.origin.z - s.origin.z) < 0.45 + rz + 0.25:
+						return false
+				return true)
 		"smoke":
 			ka = "hay"
 			kb = "pumpkins"

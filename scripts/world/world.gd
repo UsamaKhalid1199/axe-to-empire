@@ -37,6 +37,7 @@ const PADS := {
 	"crew_hut": Vector3(5.0, 0, 3.4), "fire_2": Vector3(1.9, 0, -1.8), "tables_2": Vector3(5.0, 0, 7.55),
 	"gate": Vector3(-7.6, 0, 11.5),
 }
+const GATE_PAD_OPEN := Vector3(-7.6, 0, 8.4)     # the gate pad once the road is open (Big Day replay, New Empire)
 
 var player: Player
 var cam: Camera3D
@@ -90,7 +91,18 @@ var bd_served := 0
 var bd_walkouts := 0
 var bd_scores: Array = []
 var bd: Dictionary = {}
-var _bd_cool := 0.0
+## Seconds until a lost Big Day can be retried. Kept in Game.bigday (per place, saved) so walking next door and
+## back, which builds a new world, does not reset it.
+var _bd_cool: float:
+	get:
+		var left := float(Game.bigday.get("cool_until", 0.0)) - Time.get_unix_time_from_system()
+		return clampf(left, 0.0, BD_COOL)
+	set(v):
+		if v <= 0.0:
+			Game.bigday.erase("cool_until")
+		else:
+			Game.bigday["cool_until"] = Time.get_unix_time_from_system() + minf(v, BD_COOL)
+const BD_COOL := 45.0
 # one road: the plots next door (see plot.gd / neighbor_plot.gd)
 var arrival: Dictionary = {}       # set before building: where the player enters this plot {x, z, yaw, logs}
 var nb_plots: Dictionary = {}      # side (-1 west, +1 east) -> NeighborPlot
@@ -170,10 +182,10 @@ func _finish_build() -> void:
 			player.hands.set_count(dishes)      # what you carry comes with you (it already left the rack)
 		_cross_armed = false
 	cam = Camera3D.new()
-	var vsz := get_viewport().get_visible_rect().size
-	cam.fov = 56.0 if vsz.x / maxf(1.0, vsz.y) < 0.5 else 52.0     # tall 20:9 phones: a bit wider so edge labels fit
 	cam.keep_aspect = Camera3D.KEEP_WIDTH
 	cam.far = 120.0
+	_fit_fov()
+	get_viewport().size_changed.connect(_fit_fov)
 	add_child(cam)
 	_cam_target = cam_aim(player.global_position)
 	_place_cam(1.0)
@@ -471,7 +483,7 @@ func _decor() -> void:
 	# rocks, ferns, grass
 	var spots := [[Vector3(-5.5, 0, -3.5), "rock_moss_set_01", 1.0], [Vector3(-10.8, 0, -2.2), "rock_moss_set_01", 1.3],
 		[Vector3(-12, 0, 8), "rock_moss_set_01", 1.6], [Vector3(12.9, 0, -2.6), "dead_tree_trunk", 1.0],
-		[Vector3(-6.5, 0, 8.5), "dead_tree_trunk", 0.9]]
+		[Vector3(-10.9, 0, 9.3), "dead_tree_trunk", 0.9]]     # (clear of the gate pad once the road opens)
 	for s in spots:
 		var m := Art.model(s[1])
 		m.position = s[0]
@@ -955,6 +967,8 @@ func _rebuild_all(animate: bool) -> void:
 			pads.erase(id)
 		if not pads.has(id) and (Game.build_available(id) or (id == "gate" and Game.built.has("gate"))):
 			_spawn_pad(id, animate)
+		elif id == "gate" and pads.has(id) and pads[id].position != pad_pos(id):
+			pads[id].position = pad_pos(id)      # the road just opened
 	_sync_workers()
 	_sync_fence_zone()
 
@@ -1146,6 +1160,8 @@ func _near_fade(c: Color, rough: float) -> StandardMaterial3D:
 func pad_pos(id: String) -> Vector3:
 	if id == "special":
 		return specials.pad_pos()
+	if id == "gate" and Game.built.has("gate"):
+		return GATE_PAD_OPEN     # road open: walking the road is how you go next door, so the pad steps off it
 	return PADS.get(id, Vector3.ZERO)
 
 
@@ -1833,6 +1849,21 @@ func _spawn_passer() -> void:
 	Game.fire_story("balk")
 
 
+## Horizontal FOV (KEEP_WIDTH) for the screen shape. Tall 20:9 phones get a bit wider so edge labels fit; wider
+## than 9:16 (tablets, foldables) the FOV opens up so the vertical view never shrinks below the 9:16 one.
+func _fit_fov() -> void:
+	if cam == null:
+		return
+	var vsz := get_viewport().get_visible_rect().size
+	var a := vsz.x / maxf(1.0, vsz.y)
+	if a < 0.5:
+		cam.fov = 56.0
+	elif a <= 9.0 / 16.0:
+		cam.fov = 52.0
+	else:
+		cam.fov = rad_to_deg(2.0 * atan(tan(deg_to_rad(26.0)) * a * 16.0 / 9.0))
+
+
 func _place_cam(t: float) -> void:
 	var off := cam_off
 	var shake := Vector3(randf_range(-1, 1), randf_range(-1, 1), 0) * _shake * 0.25
@@ -2052,7 +2083,7 @@ func _compute_objective() -> Dictionary:
 
 	var bd_ready: bool = pads.has("gate") and Game.big_day_ready() and _bd_cool <= 0.0
 	if bd_ready and Game.woodpile >= 20 and p.hands.count() == 0 and Game.counter_coins < int(20.0 * Game.dish_price()):
-		return {"text": "Ready? Start the Big Day: " + String(Game.big_day_def().get("name", "")), "pos": PADS.gate}
+		return {"text": "Ready? Start the Big Day: " + String(Game.big_day_def().get("name", "")), "pos": pad_pos("gate")}
 	var sp_obj: Dictionary = specials.objective(p)
 	if not sp_obj.is_empty():
 		return sp_obj
@@ -2312,7 +2343,6 @@ func _bd_count(guests: int, score: float) -> void:
 
 
 func _bd_tick(delta: float) -> void:
-	_bd_cool = maxf(0.0, _bd_cool - delta)
 	if not bd_active:
 		return
 	bd_left -= delta
@@ -2329,7 +2359,7 @@ func bd_max_walkouts() -> int:
 func _bd_end(won: bool) -> void:
 	bd_active = false
 	if not won:
-		_bd_cool = 45.0
+		_bd_cool = BD_COOL
 	else:
 		Game.stats.bigdays += 1
 	var clean := won and bd_walkouts == 0

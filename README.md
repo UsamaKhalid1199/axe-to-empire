@@ -59,8 +59,8 @@ Hotel plaza, station yards).
 Arriving at a new venue for the first time, the crew you bring sets up the cooker, one lumberjack comes along and
 there are 12 logs on the pile. Tools, bag and boots carry over between venues; buildings, kitchen and crew are per venue.
 Once a gear track is maxed, the shop sells **Pro** levels (up to Pro 10 each): Pro tool swings 10% faster per level,
-Pro bag carries +6 logs, Pro boots run +4% faster. Pro prices scale with the chapter, so the tool shed stays useful
-in every venue. Wardrobe items cost from $20K to $25M and the best ones need stars (up to 10).
+Pro bag carries +6 logs, Pro boots run +4% faster. Pro prices scale with the furthest place you have reached (not where you stand), so the tool shed stays useful
+in every venue. Wardrobe items cost from $500 (starter pieces) up to $25M (late-game pieces from $20K), the best ones need stars (up to 10), and locked ones are listed by the stars they need.
 
 The camera keeps the play area left of the side buttons and widens slightly on tall (20:9) phones.
 
@@ -78,7 +78,7 @@ The camera keeps the play area left of the side buttons and widens slightly on t
 | Signature station | +4% station pay, crew uses it from Lv 5 | crew only takes dishes the counter can spare |
 
 Live crew income (no player) with every station +5 levels pays back in 3-70 minutes in every chapter.
-Places you're not at earn 50% of the conservative crew model in `Game._rate()`, into their own counter (`Game.till(k)`).
+Places you're not at earn 35% of the conservative crew model in `Game._rate()`, into their own counter (`Game.till(k)`).
 
 ## Layout
 

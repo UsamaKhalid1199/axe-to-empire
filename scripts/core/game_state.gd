@@ -34,7 +34,7 @@ var _empire_acc := 0.0
 var _rates: Array = []              # cached coins/s per venue
 var _rates_t := 0.0
 const SAVE_VER := 3                 # 3 = one world: background cash waits on each place's counter
-const VENUE_EFFICIENCY := 0.5       # background venues earn half of their crew rate
+const VENUE_EFFICIENCY := 0.35      # background venues earn about a third of their crew rate (QA r3: 0.5 let one till buy the next place)
 
 var coins: int = 0
 var served: int = 0
@@ -275,7 +275,6 @@ func travel(k: int) -> bool:
 		return false
 	_stash()
 	var first: bool = k >= venues.size() or venues[k].is_empty()
-	_rescale_jobs(chapter_mult(venue), chapter_mult(k))
 	venue = k
 	_unstash(k)
 	cfg = chapter_cfg(k)
@@ -284,22 +283,6 @@ func travel(k: int) -> bool:
 	_rates_t = 0.0
 	save_game()
 	return true
-
-
-## Daily jobs were rolled for one chapter's prices; keep them fair when the scale changes.
-func _rescale_jobs(m_old: float, m_new: float) -> void:
-	var f := m_new / maxf(0.001, m_old)
-	if absf(f - 1.0) < 0.001:
-		return
-	for j in jobs:
-		j.reward = maxi(10, int(round(float(j.reward) * f / 10.0)) * 10)
-		if j.id == "earn" and not j.claimed:
-			var old_goal := int(j.goal)
-			var frac := float(j.prog) / maxf(1.0, float(old_goal))      # keep how far along you are, not the raw number
-			j.goal = maxi(1, int(round(float(j.goal) * f)))
-			j.prog = mini(int(round(frac * float(j.goal))), int(j.goal))
-			j.text = String(j.text).replace(str(old_goal), str(j.goal))
-	jobs_changed.emit()
 
 
 ## First arrival at a new venue: the crew you brought sets up the cooker, one lumberjack comes along
@@ -455,8 +438,7 @@ func start_new_empire() -> void:
 	_unstash(0)
 	_cc_cache.clear()
 	cfg = chapter_cfg(0)
-	jobs_day = ""
-	refresh_jobs()
+	refresh_jobs(true)        # re-roll for the fresh empire; jobs already claimed today stay claimed
 	_rates.clear()
 	refresh_stars()
 	save_game()
@@ -498,11 +480,17 @@ func speed_mult() -> float:
 	return float(cfg.boots[levels.boots].mult) + 0.04 * int(pro.boots)
 
 
-## Price of the next Pro level: grows per level and with the chapter you're in.
+## Price of the next Pro level: grows per level and with the furthest place you've reached
+## (Pro gear is yours and travels with you, so buying it back at the Camp is not a discount).
 func pro_cost(track: String) -> int:
-	var arr: Array = cfg.tools if track == "tool" else cfg[track]
+	var arr: Array = chapter_cfg(0).tools if track == "tool" else chapter_cfg(0)[track]
 	var last := float(arr[arr.size() - 1].cost)
-	return int(round(last * pow(1.5, int(pro[track]) + 1) * chapter_mult(venue) / 10.0)) * 10
+	return int(round(last * pow(1.5, int(pro[track]) + 1) * progress_mult() / 10.0)) * 10
+
+
+## Price scale of the furthest place reached (daily jobs and Pro gear use it, not where you stand).
+func progress_mult() -> float:
+	return chapter_mult(clampi(unlocked - 1, 0, chapters.size() - 1))
 
 
 func cook_time() -> float:
@@ -1031,10 +1019,20 @@ func _day_index() -> int:
 	return int(Time.get_unix_time_from_system() / 86400.0)
 
 
-func refresh_jobs() -> void:
+func refresh_jobs(force := false) -> void:
 	var today := _today()
-	if jobs_day == today and jobs.size() == 3:
+	if not force and jobs_day == today and jobs.size() == 3:
 		return
+	if jobs_day != "" and jobs_day != today:
+		for j in jobs:      # finished but not claimed before midnight: pay it rather than lose it
+			if not j.claimed and int(j.prog) >= int(j.goal):
+				add_coins(int(j.reward), false)
+				toast.emit("Yesterday's job paid: +$%d" % int(j.reward))
+	var done_ids := []
+	if jobs_day == today:
+		for j in jobs:
+			if j.claimed:
+				done_ids.append(j.id)
 	jobs_day = today
 	chest_claimed = chest_day == today
 	var rng := RandomNumberGenerator.new()
@@ -1047,13 +1045,20 @@ func refresh_jobs() -> void:
 	while jobs.size() < 3 and pool.size() > 0:
 		var j: Dictionary = pool.pop_at(rng.randi_range(0, pool.size() - 1))
 		var goal := int(j.base) + int(j.per_day) * days_played
-		var goal_scaled := goal if j.id != "earn" else int(goal * chapter_mult(venue))
+		var goal_scaled := goal if j.id != "earn" else int(goal * progress_mult())
 		var units := goal / 10 if j.id == "earn" else goal      # "earn" goals are cash, not items
 		var menu_k := minf(4.0, menu_price(cfg, levels.menu) / maxf(1.0, menu_price(cfg, 0)))
-		var reward := int(round((60 + units * 4) * float(j.reward_mult) * menu_k * chapter_mult(venue) / 10.0) * 10)
+		var reward := int(round((60 + units * 4) * float(j.reward_mult) * menu_k * progress_mult() / 10.0) * 10)
 		goal = goal_scaled
+		var done: bool = j.id in done_ids       # same-day re-roll (New Empire): already-claimed jobs stay claimed
 		jobs.append({"id": j.id, "text": String(j.text).replace("{n}", str(goal)), "goal": goal,
-			"prog": 0, "reward": reward, "claimed": false})
+			"prog": goal if done else 0, "reward": reward, "claimed": done})
+	var extra := done_ids.size() - jobs.filter(func(x): return x.claimed).size()
+	for j2 in jobs:          # the re-roll may offer different kinds of job: keep today's claim count anyway
+		if extra <= 0:
+			break
+		if not j2.claimed:
+			j2.claimed = true; j2.prog = j2.goal; extra -= 1
 	# streak: pause instead of reset if a day was missed (spec 7.2)
 	jobs_changed.emit()
 

@@ -78,6 +78,8 @@ func _draw() -> void:
 
 
 func _notification(what: int) -> void:
+	if what == NOTIFICATION_ENTER_TREE:
+		_entered_ms = Time.get_ticks_msec()
 	# a plain panel (row background, swatch frame) inside a scroll list must let drags through to the list
 	if what == NOTIFICATION_ENTER_TREE and not clickable and mouse_filter == Control.MOUSE_FILTER_STOP and _scroll_parent() != null:
 		mouse_filter = Control.MOUSE_FILTER_PASS
@@ -90,6 +92,55 @@ func make_clickable() -> UIShape:
 
 var _press_pos := Vector2.ZERO
 var _down := false
+
+const FRESH_MS := 350                      # double-tap guard window (see _fresh_block)
+const FRESH_PX := 90.0                     # "the same spot" for a second tap
+static var _last_tap_ms := -100000         # when any button last fired, where, and its rect
+static var _last_tap_pos := Vector2.ZERO
+static var _last_tap_rect := Rect2()
+static var prev_tap_ms := -100000          # the tap before that (the HUD's side buttons check it)
+static var prev_tap_pos := Vector2.ZERO
+var _entered_ms := -100000
+var _down_ms := 0
+var _down_global := Vector2.ZERO
+
+
+## True for the second tap of a quick double tap that lands on a button the first tap just built (a confirm
+## screen's "Erase" where "Reset progress" was): built right after a tap (same or next frames), pressed within
+## FRESH_MS of it, at about the same spot. Taps elsewhere go through, and so does a button rebuilt in the same
+## place as the one just tapped (a list rebuilt after a buy takes repeat taps).
+func _fresh_block() -> bool:
+	if _entered_ms < _last_tap_ms or _entered_ms - _last_tap_ms > 120 or _down_ms - _last_tap_ms >= FRESH_MS:
+		return false
+	if _down_global.distance_to(_last_tap_pos) > FRESH_PX:
+		return false
+	var r := get_global_rect()
+	return r.get_center().distance_to(_last_tap_rect.get_center()) > 12.0 or absf(r.size.x - _last_tap_rect.size.x) > 12.0
+
+
+## Where the finger went down on this button (canvas coordinates).
+func press_pos() -> Vector2:
+	return _down_global
+
+
+func _note_down(pos: Vector2) -> void:
+	_down_ms = Time.get_ticks_msec()
+	_down_global = get_global_transform() * pos
+
+
+func _fire() -> void:
+	if disabled:
+		Sfx.play("click", -10.0, 0.7)
+		return
+	if _fresh_block():
+		return
+	prev_tap_ms = _last_tap_ms
+	prev_tap_pos = _last_tap_pos
+	_last_tap_ms = Time.get_ticks_msec()
+	_last_tap_pos = _down_global
+	_last_tap_rect = get_global_rect()
+	Sfx.play("click")
+	pressed.emit()
 
 
 var _touch_idx := -1
@@ -147,6 +198,7 @@ func _gui_input(e: InputEvent) -> void:
 			_touch_idx = e.index
 			_down = true
 			_press_pos = e.position
+			_note_down(e.position)
 			var tw0 := create_tween()
 			tw0.tween_property(self, "scale", Vector2(0.94, 0.94), 0.06)
 		elif e.index == _touch_idx and not _down:
@@ -158,11 +210,7 @@ func _gui_input(e: InputEvent) -> void:
 			var tw1 := create_tween()
 			tw1.tween_property(self, "scale", Vector2.ONE, 0.18).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 			if Rect2(Vector2.ZERO, size).grow(24.0).has_point(e.position):
-				if disabled:
-					Sfx.play("click", -10.0, 0.7)
-				else:
-					Sfx.play("click")
-					pressed.emit()
+				_fire()
 			return
 		accept_event()
 		return
@@ -171,6 +219,7 @@ func _gui_input(e: InputEvent) -> void:
 			_down = true
 			_scroller = null
 			_press_pos = e.position
+			_note_down(e.position)
 			var tw := create_tween()
 			tw.tween_property(self, "scale", Vector2(0.94, 0.94), 0.06)
 		elif _scroller:
@@ -181,10 +230,6 @@ func _gui_input(e: InputEvent) -> void:
 			var tw2 := create_tween()
 			tw2.tween_property(self, "scale", Vector2.ONE, 0.18).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 			if Rect2(Vector2.ZERO, size).grow(24.0).has_point(e.position):   # a finger that rolls a little off still counts
-				if disabled:
-					Sfx.play("click", -10.0, 0.7)
-				else:
-					Sfx.play("click")
-					pressed.emit()
+				_fire()
 			return
 		accept_event()

@@ -151,6 +151,7 @@ func _run() -> void:
 	ok(w.start_big_day(), "replay big day at ch1 via world (no UI path once gate pad is gone)")
 	g.save_game(); g.load_game()
 	ok(int(g.bigday.get("tries", 0)) == tries and g.bigday.get("won", false), "mid-big-day save keeps bigday won")
+	w.bd_active = false        # (travel is blocked while a Big Day runs; this used to drop it silently)
 	await _travel(5)
 	print("STARS total=%d per venue=%s" % [g.total_stars(), range(6).map(func(k): return g.star_count(k))])
 	# ---------- prestige

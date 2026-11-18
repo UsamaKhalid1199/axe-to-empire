@@ -272,7 +272,12 @@ func _round_button(icon_name: String, text: String, cb: Callable) -> UIShape:
 	if text != "":
 		v.add_child(UI.label(text, 18, Color(1, 1, 1, 0.9), UI.font_bold(), HORIZONTAL_ALIGNMENT_CENTER))
 	b.add_child(v)
-	b.pressed.connect(cb)
+	b.pressed.connect(func():
+		# the second tap of a double tap on a modal's ✕ (or any closing button over this column) lands here
+		# once the modal has gone: ignore a tap at the same spot just after a close
+		if Time.get_ticks_msec() - _closed_ms < 400 and UIShape.prev_tap_ms >= _closed_ms - 120 				and b.press_pos().distance_to(UIShape.prev_tap_pos) < UIShape.FRESH_PX:
+			return
+		cb.call())
 	return b
 
 
@@ -327,7 +332,7 @@ func _process(delta: float) -> void:
 		goal_label.text = g
 		UI.fit(goal_label, _vw() - 140.0, 28, 20)
 		goal_pill.reset_size()
-		goal_pill.visible = g != ""
+		goal_pill.visible = g != "" and modal_kind == ""
 		goal_pill.scale = Vector2(1.08, 1.08)
 		goal_pill.create_tween().tween_property(goal_pill, "scale", Vector2.ONE, 0.25)
 	# a lost touch release (app paused mid-tap) must not freeze modal refreshes
@@ -426,6 +431,7 @@ func open_modal(kind: String) -> void:
 			var hit := _side_button_at(dim.get_global_transform() * e.position)
 			if hit:
 				close_modal()
+				_closed_ms = -100000      # (this tap is meant for the side button)
 				hit.pressed.emit()
 			else:
 				_close_or_back())
@@ -460,6 +466,7 @@ func close_modal() -> void:
 		tw.tween_callback(m.queue_free)
 	modal = null
 	modal_kind = ""
+	_closed_ms = Time.get_ticks_msec()
 	joy.blocked = false
 	_confirm_reset = false
 	_confirm_prestige = false
@@ -504,6 +511,7 @@ var _rebuild_pending := false
 var _price_btns: Array = []
 var _gate_refresh_ms := 0
 var _modal_opened_ms := 0
+var _closed_ms := -100000       # when the last modal closed (side buttons ignore taps just after)
 var _dim_down := false
 
 
@@ -580,6 +588,8 @@ func _header(v: VBoxContainer, icon_name: String, title: String, sub := "", clos
 	h.add_child(UI.icon(icon_name, 64))
 	var tv := UI.vbox(0)
 	var tl := UI.label(title, 46, Color.WHITE, UI.font_bold())
+	tl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART      # long titles (Big Day results) wrap inside the card
+	tl.custom_minimum_size.x = 120
 	tv.add_child(tl)
 	if sub != "":
 		var sl := UI.label(sub, 22, UI.MUTED)
@@ -877,6 +887,8 @@ Serve %d guests in %d:%02d. More than %d walkouts and it's over. %s" % [String(b
 			_begin_big_day())
 		v.add_child(sb)
 	if Game.chapter_done:
+		if world.bd_active:
+			return          # (leaving now would drop the Big Day)
 		# road already open: send the player on (or to the New Empire screen in the last chapter)
 		var go := UI.button("START A NEW EMPIRE" if last else "GO TO " + String(nx.name).to_upper(), "green", "gate", 30)
 		go.pressed.connect(func():
@@ -943,25 +955,15 @@ func _complete(v: VBoxContainer) -> void:
 			_rebuild_modal())
 		v.add_child(pb)
 	elif last:
-		var warn := UI.label("This erases every place you own, with its buildings, crew and cash. You keep your outfits and the +50% bonus. Are you sure?", 22, UI.RED, null, HORIZONTAL_ALIGNMENT_CENTER)
-		warn.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		v.add_child(warn)
-		var rr := UI.hbox(12)
-		var keep := UI.button("Keep playing", "green", "", 26)
-		keep.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		keep.pressed.connect(func():
-			_confirm_prestige = false
-			_rebuild_modal())
-		var go := UI.button("Start over", "red", "", 26)
-		go.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		go.pressed.connect(func():
-			_confirm_prestige = false
-			Game.start_new_empire()
-			close_modal()
-			get_tree().current_scene.reload_venue())
-		rr.add_child(keep)
-		rr.add_child(go)
-		v.add_child(rr)
+		_confirm_block(v, "This erases every place you own, with its buildings, crew and cash. You keep your outfits and the +50% bonus. Are you sure?",
+			"Keep playing", func():
+				_confirm_prestige = false
+				_rebuild_modal(),
+			"Start over", func():
+				_confirm_prestige = false
+				Game.start_new_empire()
+				close_modal()
+				get_tree().current_scene.reload_venue())
 	else:
 		var tb := UI.button("GO NEXT DOOR", "green", "gate", 34)
 		tb.pressed.connect(func():
@@ -1125,7 +1127,7 @@ func _build_task_card() -> void:
 			show_toast("Task complete! +" + UI.cash(r)))
 	h.add_child(task_btn)
 	task_card.add_child(h)
-	reno_chip = UIShape.new("dark", 18.0, Vector4(12, 6, 14, 6))
+	reno_chip = UIShape.new("glass", 18.0, Vector4(12, 6, 14, 6))      # glass: readable over snow too
 	reno_chip.make_clickable()
 	reno_chip.custom_minimum_size.y = 64          # it's a button: keep it a full tap target
 	reno_chip.pressed.connect(func(): open_modal("upgrades"))
@@ -1170,6 +1172,7 @@ func _tick_overlays() -> void:
 	var bd_on: bool = world.bd_active
 	bd_banner.visible = bd_on
 	task_card.visible = not bd_on and modal_kind == ""
+	goal_pill.visible = goal_label.text != "" and modal_kind == ""
 	if bd_on:
 		var left := maxi(0, ceili(world.bd_left))
 		bd_title.text = "%s · %d:%02d" % [String(world.bd.get("name", "")).to_upper(), left / 60, left % 60]
@@ -1182,7 +1185,7 @@ func _tick_overlays() -> void:
 	_ov_t = 0.25
 	_refresh_task()
 	if Game.task_done():
-		var k := 1.0 + 0.05 * sin(Time.get_ticks_msec() * 0.008)
+		var k := 1.03 + 0.03 * sin(Time.get_ticks_msec() * 0.008)     # pulses up from full size, never below it
 		task_btn.scale = Vector2(k, k)
 		task_btn.pivot_offset = task_btn.size * 0.5
 	else:
@@ -1534,7 +1537,15 @@ func _character(v: VBoxContainer) -> void:
 		tabs.add_child(tb)
 	list.add_child(tabs)
 	var W = load("res://scripts/core/wardrobe.gd")
-	for it in W.items_for(_wardrobe_slot):
+	var items: Array = W.items_for(_wardrobe_slot)
+	var order := {}
+	for i in items.size():
+		order[items[i].id] = i
+	items.sort_custom(func(a, b):           # star-gated items by the stars they need, else catalog order
+		var sa := int(a.get("stars", 0))
+		var sb := int(b.get("stars", 0))
+		return sa < sb if sa != sb else int(order[a.id]) < int(order[b.id]))
+	for it in items:
 		var id := String(it.id)
 		var sw := ColorRect.new()
 		var c: Array = it.get("color", [0.5, 0.5, 0.5])
@@ -1571,6 +1582,7 @@ func _character(v: VBoxContainer) -> void:
 		h.add_child(sw)
 		var tv := UI.vbox(2)
 		tv.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		tv.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 		tv.add_child(UI.label(String(it.name), 28, Color.WHITE, UI.font_bold()))
 		if stat != "":
 			tv.add_child(UI.label(stat, 20, UI.MUTED))
@@ -1634,21 +1646,11 @@ func _settings(v: VBoxContainer) -> void:
 		row.add_child(b)
 	v.add_child(row)
 	if _confirm_reset:
-		var warn := UI.label("Erase ALL progress, cash, crew and outfits? This can't be undone.", 22, UI.RED, null, HORIZONTAL_ALIGNMENT_CENTER)
-		warn.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		v.add_child(warn)
-		var rr := UI.hbox(12)
-		var cancel := UI.button("Keep my game", "green", "", 26)
-		cancel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		cancel.pressed.connect(func():
-			_confirm_reset = false
-			_rebuild_modal())
-		var erase := UI.button("Erase", "red", "", 26)
-		erase.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		erase.pressed.connect(func(): Game.reset_all())
-		rr.add_child(cancel)
-		rr.add_child(erase)
-		v.add_child(rr)
+		_confirm_block(v, "Erase ALL progress, cash, crew and outfits? This can't be undone.",
+			"Keep my game", func():
+				_confirm_reset = false
+				_rebuild_modal(),
+			"Erase", func(): Game.reset_all())
 	else:
 		var rs := UI.button("Reset progress", "red", "", 26)
 		rs.pressed.connect(func():
@@ -1657,6 +1659,26 @@ func _settings(v: VBoxContainer) -> void:
 		v.add_child(rs)
 	var cr := UI.label("Axe to Empire v%s · BigoSoft\nFonts: Inter, Barlow Condensed (OFL)" % str(ProjectSettings.get_setting("application/config/version")), 18, UI.MUTED, null, HORIZONTAL_ALIGNMENT_CENTER)
 	v.add_child(cr)
+
+
+## "Are you sure?" for a destructive button: the warning above, the safe choice where the button that asked was
+## (a quick second tap lands on it) and the destructive one well below it.
+func _confirm_block(v: VBoxContainer, warn_text: String, safe_text: String, safe_cb: Callable, danger_text: String, danger_cb: Callable) -> void:
+	var warn := UI.label(warn_text, 22, UI.RED, null, HORIZONTAL_ALIGNMENT_CENTER)
+	warn.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	v.add_child(warn)
+	var safe := UI.button(safe_text, "green", "", 26)
+	safe.pressed.connect(safe_cb)
+	v.add_child(safe)
+	var gap := Control.new()
+	gap.custom_minimum_size.y = 56
+	gap.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	v.add_child(gap)
+	var danger := UI.button(danger_text, "red", "", 24)
+	danger.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	danger.custom_minimum_size.x = 260
+	danger.pressed.connect(danger_cb)
+	v.add_child(danger)
 
 
 func _replay_story() -> void:

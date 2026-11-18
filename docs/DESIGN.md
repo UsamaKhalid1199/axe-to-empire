@@ -92,7 +92,7 @@ reward, so there is always a clear next job.
 - The six places sit side by side along one road. Winning a Big Day lets you buy the land next
   door and expand; you walk over (or jump there with MAP). Nothing is "from scratch": your cash,
   tools, bag and boots come with you, and every place you own keeps running.
-- While you play, each place you're not at earns 50% of its crew rate (`Game.VENUE_EFFICIENCY`).
+- While you play, each place you're not at earns 35% of its crew rate (`Game.VENUE_EFFICIENCY`).
   That cash piles up on that place's own counter (its *till*), up to 20 minutes of its rate
   (`Game.TILL_CAP_MIN`). Walk over to collect it.
 - The HUD shows a "$X waiting at <place>" chip (the place with the most) under the task card;

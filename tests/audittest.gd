@@ -79,7 +79,11 @@ func _run() -> void:
 	ok(d.has("pro") and int(d.pro.bag) == g.PRO_MAX, "Pro levels are saved")
 	var ch1: int = g.pro_cost("boots")
 	g.venue = 4
-	ok(g.pro_cost("boots") > ch1 * 5, "Pro priced per chapter (ch1 $%d, ch5 $%d)" % [ch1, g.pro_cost("boots")])
+	ok(g.pro_cost("boots") == ch1, "Pro costs the same wherever you stand (ch1 $%d, ch5 $%d)" % [ch1, g.pro_cost("boots")])
+	var u0: int = g.unlocked
+	g.unlocked = 5
+	ok(g.pro_cost("boots") > ch1 * 5, "Pro priced by the furthest place reached ($%d -> $%d)" % [ch1, g.pro_cost("boots")])
+	g.unlocked = u0
 	g.venue = 0
 	print("AUDIT fails=%d" % fails)
 	quit()
