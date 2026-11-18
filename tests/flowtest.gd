@@ -51,8 +51,10 @@ func _run() -> void:
 	var r1: float = g.venue_rate(0)
 	ok(r1 > 0.0, "chapter 1 crew earns in background (%.2f c/s)" % r1)
 	var c0: int = g.coins
+	var t0: int = g.till(0)
 	await create_timer(4.0).timeout
-	ok(g.coins > c0, "empire income adds coins (%d -> %d)" % [c0, g.coins])
+	ok(g.till(0) > t0 and g.coins == c0, "chapter 1 cash piles up on its own counter, not in your pocket (%d -> %d)" % [t0, g.till(0)])
+	ok(g.tills_waiting() == g.till(0), "waiting cash totals the other places")
 	# --- save / load round trip
 	g.coins = 777
 	g.built = {"campfire": true}

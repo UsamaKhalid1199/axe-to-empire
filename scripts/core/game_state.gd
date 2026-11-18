@@ -9,6 +9,7 @@ signal jobs_changed
 signal story(beats: Array)          # story cards to show (portrait + line)
 signal task_changed
 signal offline_ready                # away earnings computed after a resume
+signal tills_changed                 # cash waiting at other places changed
 
 const SAVE_PATH := "user://save_v2.json"
 const BACKUP_PATH := "user://save_v2.bak"
@@ -28,6 +29,7 @@ var prestige := 0                   # completed empires: +50% income each
 var _empire_acc := 0.0
 var _rates: Array = []              # cached coins/s per venue
 var _rates_t := 0.0
+const SAVE_VER := 3                 # 3 = one world: background cash waits on each place's counter
 const VENUE_EFFICIENCY := 0.5       # background venues earn half of their crew rate
 
 var coins: int = 0
@@ -364,19 +366,63 @@ func _refresh_rates() -> void:
 		_rates.append(venue_rate(k) if k != venue else 0.0)
 
 
+## One world: every other place you own keeps working while you play, and its cash piles up on its own
+## counter (venues[k].counter_coins) until you walk over and collect it. Capped so a visit is worth it but
+## you can't park forever. Nothing piles up while the app is closed.
+const TILL_CAP_MIN := 20.0
+var _till_acc: Dictionary = {}          # k -> fractional coins
+
+
 func _empire_tick(delta: float) -> void:
 	_rates_t -= delta
 	if _rates_t <= 0.0:
 		_rates_t = 3.0
 		_refresh_rates()
-	var r := empire_rate()
-	if r <= 0.0:
-		return
-	_empire_acc += r * delta
-	if _empire_acc >= 1.0:
-		var n := int(_empire_acc)
-		_empire_acc -= n
-		add_coins(n)
+	var changed := false
+	for k in _rates.size():
+		if k == venue or k >= venues.size() or venues[k].is_empty():
+			continue
+		var r: float = _rates[k] * VENUE_EFFICIENCY
+		if r <= 0.0:
+			continue
+		var vd: Dictionary = venues[k]
+		var cap := maxi(200, int(r * 60.0 * TILL_CAP_MIN))       # same as till_cap(k), without recomputing the rate
+		var have := int(vd.get("counter_coins", 0))
+		if have >= cap:
+			continue
+		var acc: float = float(_till_acc.get(k, 0.0)) + r * delta
+		if acc >= 1.0:
+			var n := mini(int(acc), cap - have)
+			acc -= int(acc)
+			vd["counter_coins"] = have + n
+			changed = true
+		_till_acc[k] = acc
+	if changed:
+		tills_changed.emit()
+
+
+## Cash waiting on place k's counter (the active place's is counter_coins).
+func till(k: int) -> int:
+	if k == venue:
+		return counter_coins
+	if k < 0 or k >= venues.size() or venues[k].is_empty():
+		return 0
+	return int(venues[k].get("counter_coins", 0))
+
+
+## Most cash a place's counter holds before its crew stop adding to it (20 min of its background rate).
+func till_cap(k: int) -> int:
+	var r := (venue_rate(k) if k != venue else passive_rate()) * VENUE_EFFICIENCY
+	return maxi(200, int(r * 60.0 * TILL_CAP_MIN))
+
+
+## Total cash waiting at the places you're not at.
+func tills_waiting() -> int:
+	var t := 0
+	for k in unlocked:
+		if k != venue:
+			t += till(k)
+	return t
 
 
 func income_mult() -> float:
@@ -1050,7 +1096,7 @@ func to_dict() -> Dictionary:
 		"counter_coins": counter_coins, "jobs_day": jobs_day, "jobs": jobs, "streak": streak,
 		"streak_last_day": streak_last_day, "chest_claimed": chest_claimed, "chest_day": chest_day, "mute": mute, "quality": quality, "quality_auto": quality_auto,
 		"sp": sp, "venue": venue, "unlocked": unlocked, "venues": _venues_for_save(), "vserved": vserved, "prestige": prestige,
-		"t": int(Time.get_unix_time_from_system()), "lv2": true, "settings": settings, "profile": profile, "pro": pro, "offline_reward": offline_reward, "gate_refund": true,
+		"t": int(Time.get_unix_time_from_system()), "lv2": true, "save_ver": SAVE_VER, "settings": settings, "profile": profile, "pro": pro, "offline_reward": offline_reward, "gate_refund": true,
 	}
 
 
