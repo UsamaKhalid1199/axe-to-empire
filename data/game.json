@@ -267,6 +267,7 @@
     "served": 140
   },
   "offline": {
+    "enabled": false,
     "efficiency": 0.25,
     "cap_hours": 1.0,
     "cap_per_venue_h": 0.5,

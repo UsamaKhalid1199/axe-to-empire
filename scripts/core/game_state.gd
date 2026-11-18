@@ -1178,6 +1178,8 @@ func _compute_offline(t_saved: int) -> void:
 	var now := int(Time.get_unix_time_from_system())
 	var away := now - t_saved
 	var o: Dictionary = cfg.offline
+	if not bool(o.get("enabled", true)):   # you earn while you play: nothing piles up while the app is closed
+		return
 	if away < int(o.min_away_s):        # also guards clock rollback (negative)
 		return
 	var cap_h := minf(float(o.cap_max_h), float(o.cap_hours) + float(o.cap_per_venue_h) * (unlocked - 1))

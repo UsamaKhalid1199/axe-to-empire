@@ -22,6 +22,7 @@ var _coin_shown := 0.0
 var _toast_q: Array = []
 var _toast_t := 0.0
 var _confirm_reset := false
+var _confirm_prestige := false
 var fps_label: Label
 var stars_label: Label
 var task_card: UIShape
@@ -388,6 +389,7 @@ func close_modal() -> void:
 	modal_kind = ""
 	joy.blocked = false
 	_confirm_reset = false
+	_confirm_prestige = false
 	if not _story_q.is_empty():
 		_next_story.call_deferred()
 	elif Game.offline_reward > 0:
@@ -627,7 +629,7 @@ func _shop(v: VBoxContainer) -> void:
 
 
 func _crew(v: VBoxContainer) -> void:
-	_header(v, "crew", "Hire Crew", "They keep working while you're away")
+	_header(v, "crew", "Hire Crew", "They work while you play")
 	for role in ["lumberjack", "waiter", "cook"]:
 		var c: Dictionary = Game.cfg.crew[role]
 		var have: int = Game.crew[role]
@@ -635,7 +637,7 @@ func _crew(v: VBoxContainer) -> void:
 		var btn := _price_button(cost, func(): Game.hire(role)) if cost >= 0 else _price_button(0, Callable(), "FULL")
 		_row(v, role, c.name, c.desc, "Hired %d / %d" % [have, int(c.max)], btn)
 	var rate := Game.passive_rate()
-	var note := ("Crew income while away: %s / min (up to %s h)" % [UI.cash(rate * 60.0 * float(Game.cfg.offline.efficiency)), _hours(Game.offline_cap_hours())]) if rate > 0 else "Hire a lumberjack and a waiter to earn while away"
+	var note := ("Crew income: %s / min while you play" % UI.cash(rate * 60.0)) if rate > 0 else "Hire a lumberjack and a waiter: they earn alongside you while you play"
 	var l := UI.label(note, 21, UI.MUTED, null, HORIZONTAL_ALIGNMENT_CENTER)
 	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	v.add_child(l)
@@ -812,13 +814,32 @@ func _complete(v: VBoxContainer) -> void:
 	var l := UI.label(txt, 22, UI.MUTED, null, HORIZONTAL_ALIGNMENT_CENTER)
 	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	v.add_child(l)
-	if last:
+	if last and not _confirm_prestige:
 		var pb := UI.button("START NEW EMPIRE  (+50%)", "green", "star", 30)
 		pb.pressed.connect(func():
+			_confirm_prestige = true
+			_rebuild_modal())
+		v.add_child(pb)
+	elif last:
+		var warn := UI.label("This erases your venues, buildings, crew and cash. You keep your outfits and the +50% bonus. Are you sure?", 22, UI.RED, null, HORIZONTAL_ALIGNMENT_CENTER)
+		warn.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		v.add_child(warn)
+		var rr := UI.hbox(12)
+		var keep := UI.button("Keep playing", "green", "", 26)
+		keep.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		keep.pressed.connect(func():
+			_confirm_prestige = false
+			_rebuild_modal())
+		var go := UI.button("Start over", "red", "", 26)
+		go.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		go.pressed.connect(func():
+			_confirm_prestige = false
 			Game.start_new_empire()
 			close_modal()
 			get_tree().current_scene.reload_venue())
-		v.add_child(pb)
+		rr.add_child(keep)
+		rr.add_child(go)
+		v.add_child(rr)
 	else:
 		var tb := UI.button("TRAVEL NOW", "green", "gate", 34)
 		tb.pressed.connect(func():
@@ -1368,7 +1389,7 @@ func _howto(v: VBoxContainer) -> void:
 		["dish", "Carry dishes from the rack to the counter. Guests pay; collect the cash pile."],
 		["smile", "Serve fast: happy guests pay +20%, guests you serve in person pay +25%. Slow service and they walk out."],
 		["upgrade", "UPGRADE levels the kitchen, menu, dining and signboard up to Lv 25. Big levels take time to build."],
-		["crew", "Hire crew to keep things running while you're away. They're slower than you, so the empire grows fastest when you play."],
+		["crew", "Hire crew to keep things running while you play. They're slower than you, so you earn the most when you serve guests yourself."],
 		["bigday", "Build everything, then start the Big Day at the gate to unlock the next place."],
 		["trophy", "Earn 3 stars per place for permanent income bonuses."],
 	]:
