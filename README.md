@@ -21,8 +21,10 @@ Godot 4.7.2, GDScript, `gl_compatibility` renderer. Tuned for low-end phones (Po
 7. When every pad is built, start the chapter's **Big Day** at the gate: serve the goal within 180 s without
    too many walkouts. Winning opens the gate (the savings goal is a target, not a fee: your cash comes with you) and earns the first star; more stars (served 2x the gate goal at
    rating 4.5+, a clean Big Day with all stations Lv 15+) raise income.
-8. Use **MAP** to travel. Background venues earn at a reduced rate; away earnings are capped at 1-4 h depending
-   on unlocked venues and need a crew. The game really pauses (tree + audio) when the phone locks.
+8. **One world.** Every place sits next to the last one along the same road: walk across, or tap **MAP** to jump.
+   Places you're not at keep working while you play, and their cash piles up on their own counter (up to 20 min of
+   their crew income) until you go and collect it; the "$X waiting at ..." chip shows where. You earn while you
+   play: nothing builds up while the app is closed (`offline.enabled=false`). The game really pauses when the phone locks.
 
 Guests have moods (happy / impatient / angry faces): happy guests pay +20%; past their patience they walk out,
 annoying the two guests behind them. When the line is full, passers-by walk on ("TOO BUSY!") and the sale is lost.
@@ -76,7 +78,7 @@ The camera keeps the play area left of the side buttons and widens slightly on t
 | Signature station | +4% station pay, crew uses it from Lv 5 | crew only takes dishes the counter can spare |
 
 Live crew income (no player) with every station +5 levels pays back in 3-70 minutes in every chapter.
-Background venues earn 50% and away earnings 25% of the conservative crew model in `Game._rate()`.
+Places you're not at earn 50% of the conservative crew model in `Game._rate()`, into their own counter (`Game.till(k)`).
 
 ## Layout
 

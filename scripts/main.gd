@@ -1,6 +1,7 @@
 extends Node
 ## Boots the world + HUD and spawns floating texts.
 
+const WorldScript := preload("res://scripts/world/world.gd")
 var world: Node3D
 var hud: Hud
 var _keep: Array = []       # holds preloaded resources so later load() calls hit the cache
@@ -48,13 +49,14 @@ func _ready() -> void:
 
 
 ## Builds the active venue's world + HUD behind the loader (boot, travel, new empire).
-func _build_venue(ls: LoadingScreen, from: float) -> void:
+func _build_venue(ls: LoadingScreen, from: float, arrive := {}) -> void:
 	var ch: Dictionary = Game.chapter()
 	ls.set_status("Opening " + String(ch.name) + "…", from)
 	ls.sync()
 	await _frames(2)
-	world = preload("res://scripts/world/world.gd").new()
+	world = WorldScript.new()
 	world.staged = true
+	world.arrival = arrive
 	add_child(world)
 	var steps: Array = world.build_steps()
 	for i in steps.size():
@@ -70,19 +72,84 @@ func _build_venue(ls: LoadingScreen, from: float) -> void:
 	add_child(hud)
 	move_child(ls, -1)
 	world.float_text.connect(_float_text)
+	world.cross_requested.connect(walk_to)
 	# let shaders compile behind the loader
 	ls.set_status("Almost there…", 0.96)
 	await _frames(6)
 	ls.finish()
 
 
+## MAP / gate travel: full rebuild behind the loading screen; you arrive on the road at the side you came from.
 func travel_to(k: int) -> void:
+	var from := Game.venue
 	if Game.travel(k):
-		reload_venue()
+		reload_venue(WorldScript.map_arrival(from, k))
+
+
+## Walking along the road into the plot next door: a quick fade instead of the loading screen.
+## The venue still has to be rebuilt (every plot is laid out around the origin), but the heavy parts are
+## cached (models, materials, ground masks precomputed on a worker thread), so the screen is black only for
+## the build itself plus two frames.
+var crossing := false
+var last_cross_ms := 0.0
+
+
+func walk_to(k: int, arrive: Dictionary) -> void:
+	if crossing or get_node_or_null("LoadingScreen") != null:
+		return
+	crossing = true
+	var layer := CanvasLayer.new()
+	layer.name = "Fade"
+	layer.layer = 120
+	var black := ColorRect.new()
+	black.color = Color(0, 0, 0, 0)
+	black.mouse_filter = Control.MOUSE_FILTER_STOP
+	black.set_anchors_preset(Control.PRESET_FULL_RECT)
+	layer.add_child(black)
+	add_child(layer)
+	var tw := create_tween()
+	tw.set_ignore_time_scale(true)
+	tw.tween_property(black, "color:a", 1.0, 0.14)
+	await tw.finished
+	if not Game.travel(k):
+		layer.queue_free()
+		crossing = false
+		if world:
+			world._crossing = false
+		return
+	Sfx.saw(false)
+	var t0 := Time.get_ticks_usec()
+	if hud:
+		hud.queue_free()
+		hud = null
+	if world:
+		world.queue_free()
+		world = null
+	await get_tree().process_frame
+	var t1 := Time.get_ticks_usec()
+	world = WorldScript.new()
+	world.arrival = arrive
+	add_child(world)            # builds every step at once (not staged)
+	var t_world := (Time.get_ticks_usec() - t1) / 1000.0
+	hud = Hud.new()
+	hud.world = world
+	add_child(hud)
+	move_child(layer, -1)
+	world.float_text.connect(_float_text)
+	world.cross_requested.connect(walk_to)
+	last_cross_ms = (Time.get_ticks_usec() - t1) / 1000.0
+	await _frames(2)
+	print("CROSS to %d: build %.0f ms (world %.0f %s), black %.0f ms" % [k, last_cross_ms, t_world, world.build_ms, (Time.get_ticks_usec() - t0) / 1000.0])
+	tw = create_tween()
+	tw.set_ignore_time_scale(true)
+	tw.tween_property(black, "color:a", 0.0, 0.2)
+	await tw.finished
+	layer.queue_free()
+	crossing = false
 
 
 ## Tear down the current venue and build the active one again.
-func reload_venue() -> void:
+func reload_venue(arrive := {}) -> void:
 	Sfx.saw(false)
 	var ls := LoadingScreen.new()
 	ls.name = "LoadingScreen"
@@ -95,7 +162,7 @@ func reload_venue() -> void:
 		world.queue_free()
 		world = null
 	await _frames(2)
-	await _build_venue(ls, 0.3)
+	await _build_venue(ls, 0.3, arrive)
 	var t := Timer.new()
 	t.wait_time = 5.0
 	t.autostart = true

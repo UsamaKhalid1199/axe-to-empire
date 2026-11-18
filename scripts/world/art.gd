@@ -141,6 +141,114 @@ static func _merge_collect(n: Node, xf: Transform3D, skip: Array, tools: Diction
 		_merge_collect(c, cx, skip, tools, order, parts, shadow)
 
 
+## Cheapest static batching, for scenery that is only looked at (the neighbouring plots): bakes every mesh under
+## `root` into ONE mesh with one surface per albedo texture (plain colours share an untextured surface). Each
+## material's colour goes into the vertex colours, so a whole camp of cabins, cookers and tables is 1-3 draws.
+## Metallic, roughness and normal maps are dropped. Label3Ds and other non-mesh nodes are skipped. Every child
+## of `root` is freed and replaced by the baked instance (no shadows). Returns the baked instance.
+static func bake_flat(root: Node3D) -> MeshInstance3D:
+	var tools := {}          # texture (or the "" key) -> SurfaceTool
+	var order: Array = []
+	_bake_collect(root, Transform3D.IDENTITY, tools, order)
+	for c in root.get_children():
+		root.remove_child(c)
+		c.free()
+	var mi := MeshInstance3D.new()
+	mi.name = "Baked"
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	if order.is_empty():
+		root.add_child(mi)
+		return mi
+	var am := ArrayMesh.new()
+	for key in order:
+		tools[key].commit(am)
+		am.surface_set_material(am.get_surface_count() - 1, _flat_mat(key))
+	mi.mesh = am
+	root.add_child(mi)
+	return mi
+
+
+## Vertex colours store linear colour / FLAT_RANGE so tints brighter than white (wall colours up to 1.6) survive
+## 8-bit vertex colours; the material multiplies them back.
+const FLAT_RANGE := 4.0
+
+
+static func _flat_mat(key) -> StandardMaterial3D:
+	return _c("flat:%s" % [key.resource_path if key is Texture2D else "none"], func():
+		var m := StandardMaterial3D.new()
+		m.vertex_color_use_as_albedo = true
+		m.albedo_color = Color(FLAT_RANGE, FLAT_RANGE, FLAT_RANGE).linear_to_srgb()
+		m.roughness = 0.85
+		if key is Texture2D:
+			m.albedo_texture = key
+		return m)
+
+
+static func _bake_collect(n: Node, xf: Transform3D, tools: Dictionary, order: Array) -> void:
+	for c in n.get_children():
+		if not (c is Node3D) or not c.visible:
+			continue
+		var cx: Transform3D = xf * c.transform
+		if c is MeshInstance3D and c.mesh and c.skin == null:
+			for si in c.mesh.get_surface_count():
+				if c.mesh is ArrayMesh and c.mesh.surface_get_primitive_type(si) != Mesh.PRIMITIVE_TRIANGLES:
+					continue
+				var mat: Material = c.get_active_material(si)
+				var col := Color(0.7, 0.7, 0.7)
+				var tex: Texture2D = null
+				var uvs := Vector2.ONE
+				var use_vc := false
+				if mat is BaseMaterial3D:
+					col = mat.albedo_color
+					tex = mat.albedo_texture
+					uvs = Vector2(mat.uv1_scale.x, mat.uv1_scale.y)
+					use_vc = mat.vertex_color_use_as_albedo
+				var lin := col.srgb_to_linear() / FLAT_RANGE
+				lin.a = 1.0
+				var arr: Array = c.mesh.surface_get_arrays(si)
+				var nv: int = arr[Mesh.ARRAY_VERTEX].size()
+				# the material colour becomes the vertex colour (native fill / multiply; no per-vertex script work
+				# except for the rare vertex-coloured or UV-scaled source)
+				var cols := PackedColorArray()
+				if use_vc and arr[Mesh.ARRAY_COLOR] != null:
+					cols = arr[Mesh.ARRAY_COLOR]
+					for i in nv:
+						cols[i] = Color(cols[i].r * lin.r, cols[i].g * lin.g, cols[i].b * lin.b, 1.0)
+				else:
+					cols.resize(nv)
+					cols.fill(lin)
+				arr[Mesh.ARRAY_COLOR] = cols
+				if arr[Mesh.ARRAY_TEX_UV] == null:
+					var z := PackedVector2Array()
+					z.resize(nv)
+					arr[Mesh.ARRAY_TEX_UV] = z
+				elif uvs != Vector2.ONE:
+					var uv: PackedVector2Array = arr[Mesh.ARRAY_TEX_UV]
+					for i in nv:
+						uv[i] *= uvs
+					arr[Mesh.ARRAY_TEX_UV] = uv
+				if arr[Mesh.ARRAY_NORMAL] == null:
+					var up := PackedVector3Array()
+					up.resize(nv)
+					up.fill(Vector3.UP)
+					arr[Mesh.ARRAY_NORMAL] = up
+				for drop in [Mesh.ARRAY_TANGENT, Mesh.ARRAY_TEX_UV2, Mesh.ARRAY_BONES, Mesh.ARRAY_WEIGHTS,
+						Mesh.ARRAY_CUSTOM0, Mesh.ARRAY_CUSTOM1, Mesh.ARRAY_CUSTOM2, Mesh.ARRAY_CUSTOM3]:
+					arr[drop] = null
+				if arr[Mesh.ARRAY_INDEX] == null:
+					arr[Mesh.ARRAY_INDEX] = PackedInt32Array(range(nv))     # append_from needs every part indexed
+				var tmp := ArrayMesh.new()
+				tmp.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr)
+				var key = tex if tex else ""
+				if not tools.has(key):
+					var st := SurfaceTool.new()
+					st.begin(Mesh.PRIMITIVE_TRIANGLES)
+					tools[key] = st
+					order.append(key)
+				tools[key].append_from(tmp, 0, cx)
+		_bake_collect(c, cx, tools, order)
+
+
 # ------------------------------------------------------------------ meshes
 
 static func _cyl(st: SurfaceTool, r0: float, r1: float, y0: float, y1: float, seg: int, v_scale: float, axis_x := false) -> void:

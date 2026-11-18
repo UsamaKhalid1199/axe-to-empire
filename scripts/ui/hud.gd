@@ -40,6 +40,12 @@ var bd_bar: ProgressBar
 var _story_q: Array = []
 var _story_showing := false
 var _bd_result: Array = []
+var till_chip: UIShape            # "$12.3K waiting at Forest Camp": opens the map
+var till_label: Label
+var till_k := -1                  # place the chip points at (-1: nothing waiting)
+var _till_dirty := true
+var _till_venue := -1
+var _toast_holder: Control
 
 
 func _ready() -> void:
@@ -58,6 +64,9 @@ func _ready() -> void:
 	_build_toast()
 	_build_task_card()
 	_build_bd_banner()
+	_build_till_chip()
+	Game.tills_changed.connect(func(): _till_dirty = true)
+	Game.state_changed.connect(func(): _till_dirty = true)
 	Game.story.connect(_on_story)
 	Game.task_changed.connect(_refresh_task)
 	Game.offline_ready.connect(func():
@@ -98,7 +107,7 @@ func _side_button_at(p: Vector2) -> UIShape:
 func _ui_hit(p: Vector2) -> bool:
 	if modal != null:
 		return true
-	for c in jobs_btn.get_parent().get_parent().get_children() + [task_btn, task_card, reno_chip]:
+	for c in jobs_btn.get_parent().get_parent().get_children() + [task_btn, task_card, reno_chip, till_chip]:
 		if c is Control and c.is_visible_in_tree() and c.get_global_rect().has_point(p):
 			return true
 	return false
@@ -236,6 +245,7 @@ func _build_toast() -> void:
 	c.position.y = _safe_top() + 330
 	c.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	root.add_child(c)
+	_toast_holder = c
 	toast_box = UIShape.new("gold", 24.0, Vector4(26, 12, 26, 12))
 	toast_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	toast_label = UI.label("", 30, UI.INK, UI.font_bold(), HORIZONTAL_ALIGNMENT_CENTER)
@@ -296,6 +306,12 @@ func _process(delta: float) -> void:
 		toast_box.size = Vector2.ZERO
 		toast_box.size = toast_box.get_combined_minimum_size()
 		toast_box.position = Vector2((_vw() - toast_box.size.x) * 0.5, 0.0)
+		# below the left column (task card, renovation chip, cash-waiting chip) so it never hides them
+		var ty := _safe_top() + 330.0
+		for ch in [task_card, reno_chip, till_chip]:
+			if ch and ch.visible:
+				ty = maxf(ty, ch.position.y + ch.size.y + 12.0)
+		_toast_holder.position.y = ty
 		toast_box.pivot_offset = toast_box.size * 0.5
 		_toast_t = 2.2 + 0.03 * maxf(0.0, toast_label.text.length() - 30.0)
 		var tw := create_tween()
@@ -516,7 +532,7 @@ func _header(v: VBoxContainer, icon_name: String, title: String, sub := "", clos
 	v.add_child(h)
 
 
-func _row(v: VBoxContainer, icon_name: String, title: String, desc: String, stat: String, btn: UIShape) -> void:
+func _row(v: VBoxContainer, icon_name: String, title: String, desc: String, stat: String, btn: UIShape, extra: Control = null) -> void:
 	var r := UIShape.new("dark", 22.0, Vector4(14, 12, 14, 12))
 	r.mouse_filter = Control.MOUSE_FILTER_PASS
 	var h := UI.hbox(14)
@@ -537,6 +553,8 @@ func _row(v: VBoxContainer, icon_name: String, title: String, desc: String, stat
 		sl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		sl.custom_minimum_size.x = 260
 		tv.add_child(sl)
+	if extra:
+		tv.add_child(extra)
 	h.add_child(tv)
 	if btn:
 		btn.size_flags_vertical = Control.SIZE_SHRINK_CENTER
@@ -551,6 +569,11 @@ func _fit_scroll(sc: ScrollContainer, cap: float) -> void:
 		return
 	var h: float = (sc.get_child(0) as Control).get_combined_minimum_size().y
 	sc.custom_minimum_size.y = minf(cap, h + 4.0)
+	# wrapped labels only know their real height once laid out at the card's width: measure again
+	await get_tree().process_frame
+	if is_instance_valid(sc) and sc.get_child_count() > 0:
+		h = (sc.get_child(0) as Control).get_combined_minimum_size().y
+		sc.custom_minimum_size.y = minf(cap, h + 4.0)
 
 
 func _restore_scroll(v: int) -> void:
@@ -637,7 +660,7 @@ func _crew(v: VBoxContainer) -> void:
 		var btn := _price_button(cost, func(): Game.hire(role)) if cost >= 0 else _price_button(0, Callable(), "FULL")
 		_row(v, role, c.name, c.desc, "Hired %d / %d" % [have, int(c.max)], btn)
 	var rate := Game.passive_rate()
-	var note := ("Crew income: %s / min while you play" % UI.cash(rate * 60.0)) if rate > 0 else "Hire a lumberjack and a waiter: they earn alongside you while you play"
+	var note := ("Crew income: %s / min while you play. When you're next door, it waits on this counter." % UI.cash(rate * 60.0)) if rate > 0 else "Hire a lumberjack and a waiter. They keep this place earning while you play, even when you're next door."
 	var l := UI.label(note, 21, UI.MUTED, null, HORIZONTAL_ALIGNMENT_CENTER)
 	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	v.add_child(l)
@@ -706,15 +729,15 @@ func _jobs(v: VBoxContainer) -> void:
 
 
 func _offline(v: VBoxContainer) -> void:
-	_header(v, "clock", "While you were away", "", false)
-	var mins := Game.offline_seconds / 60
-	var t := "%dh %02dm" % [mins / 60, mins % 60]
-	v.add_child(UI.label("Your crew kept your places running for %s." % t, 24, UI.MUTED, null, HORIZONTAL_ALIGNMENT_CENTER))
+	_header(v, "clock", "Welcome back", "", false)
+	var wl := UI.label("Your crew saved this for you.", 24, UI.MUTED, null, HORIZONTAL_ALIGNMENT_CENTER)
+	wl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	v.add_child(wl)
 	var amt := UI.hbox(12)
 	amt.add_child(UI.icon("coin", 84))
 	amt.add_child(UI.num(UI.cash(Game.offline_reward), 84, UI.CASH))
 	v.add_child(amt)
-	var al := UI.label("Away, your crew earns at %d%%, for up to %s hours. Play to earn far more: guests pay more when you serve them yourself." % [int(float(Game.cfg.offline.efficiency) * 100), _hours(Game.offline_cap_hours())], 20, UI.MUTED, null, HORIZONTAL_ALIGNMENT_CENTER)
+	var al := UI.label("Your places earn while you play. Each one's cash waits on its own counter until you come by.", 20, UI.MUTED, null, HORIZONTAL_ALIGNMENT_CENTER)
 	al.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	v.add_child(al)
 	var b := UI.button("COLLECT", "gold", "", 36)
@@ -729,9 +752,9 @@ func _gate(v: VBoxContainer) -> void:
 	var last := Game.is_last_chapter()
 	var nx: Dictionary = {} if last else Game.chapters[Game.venue + 1]
 	if last:
-		_header(v, "star", "Complete the Empire", "Finish every venue, then start a New Empire with +50% income")
+		_header(v, "star", "Complete the Empire", "Finish every place, then start a New Empire with +50% income")
 	else:
-		_header(v, "gate", String(nx.name), "Next venue: " + String(nx.tagline).to_lower())
+		_header(v, "gate", String(nx.name), "The land next door: " + String(nx.tagline).to_lower())
 	var g: Dictionary = Game.cfg.gate
 	var s := Game.gate_status()
 	var need_built: Array = ["tables_2", "crew_hut"] + (["special"] if Game.special_type() != "" else [])
@@ -770,10 +793,14 @@ Serve %d guests in %d:%02d. More than %d walkouts and it's over. %s" % [String(b
 		v.add_child(sb)
 	if Game.chapter_done:
 		# road already open: send the player on (or to the New Empire screen in the last chapter)
-		var go := UI.button("START A NEW EMPIRE" if last else "TRAVEL TO " + String(nx.name).to_upper(), "green", "gate", 30)
+		var go := UI.button("START A NEW EMPIRE" if last else "GO TO " + String(nx.name).to_upper(), "green", "gate", 30)
 		go.pressed.connect(func(): open_modal("complete" if last else "empire"))
 		v.add_child(go)
 		return
+	if not last:
+		var gl := UI.label("Open it to expand next door. %s keeps working while you play there." % String(Game.chapter().name), 21, UI.MUTED, null, HORIZONTAL_ALIGNMENT_CENTER)
+		gl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		v.add_child(gl)
 	var b := UI.button("COMPLETE THE EMPIRE" if last else "UNLOCK " + String(nx.name).to_upper(), "green", "gate", 30)
 	b.disabled = not Game.gate_ready()
 	b.pressed.connect(func():
@@ -810,7 +837,7 @@ func _complete(v: VBoxContainer) -> void:
 		txt = "You built the whole Timber Empire! Start a New Empire in a new valley: everything resets, but every dollar you earn is worth +50% more, forever."
 	else:
 		var nx: Dictionary = Game.chapters[Game.venue + 1]
-		txt = "%s is open: %s. New there: the %s. It's a brand-new place, so you build it up from scratch, but your %s comes with you, and your crew here keeps earning for you." % [nx.name, String(nx.tagline).to_lower(), String(nx.get("special", {}).get("name", "")).to_lower(), UI.cash(Game.coins)]
+		txt = "You bought the land next door: %s, %s. New there: the %s. Your %s comes with you. %s keeps working while you play, and its cash waits on its counter." % [nx.name, String(nx.tagline).to_lower(), String(nx.get("special", {}).get("name", "")).to_lower(), UI.cash(Game.coins), String(ch.name)]
 	var l := UI.label(txt, 22, UI.MUTED, null, HORIZONTAL_ALIGNMENT_CENTER)
 	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	v.add_child(l)
@@ -821,7 +848,7 @@ func _complete(v: VBoxContainer) -> void:
 			_rebuild_modal())
 		v.add_child(pb)
 	elif last:
-		var warn := UI.label("This erases your venues, buildings, crew and cash. You keep your outfits and the +50% bonus. Are you sure?", 22, UI.RED, null, HORIZONTAL_ALIGNMENT_CENTER)
+		var warn := UI.label("This erases every place you own, with its buildings, crew and cash. You keep your outfits and the +50% bonus. Are you sure?", 22, UI.RED, null, HORIZONTAL_ALIGNMENT_CENTER)
 		warn.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		v.add_child(warn)
 		var rr := UI.hbox(12)
@@ -841,7 +868,7 @@ func _complete(v: VBoxContainer) -> void:
 		rr.add_child(go)
 		v.add_child(rr)
 	else:
-		var tb := UI.button("TRAVEL NOW", "green", "gate", 34)
+		var tb := UI.button("GO NEXT DOOR", "green", "gate", 34)
 		tb.pressed.connect(func():
 			close_modal()
 			get_tree().current_scene.travel_to(Game.venue + 1))
@@ -851,18 +878,23 @@ func _complete(v: VBoxContainer) -> void:
 	v.add_child(b)
 
 
-## Empire map: every chapter, its income, and travel.
+## Empire map: every place on the road, the cash waiting on its counter, what it earns, and fast travel.
 func _empire(v: VBoxContainer) -> void:
+	_map_tills.clear()
 	var er := Game.empire_rate() * 60.0
+	var waiting := Game.tills_waiting()
 	var sub: String
-	if er > 0:
-		sub = "Background income: %s / min" % UI.cash(er)
+	if waiting > 0:
+		sub = "%s waiting on your counters. Go there to collect it." % UI.cash(waiting)
+	elif er > 0:
+		sub = "Your other places earn %s/min while you play" % UI.cash(er)
 	else:
-		sub = "Crews keep earning at half speed at venues you leave"
+		sub = "Your places keep working while you play"
 	_header(v, "gate", "Your Empire", sub)
 	var sc := ScrollContainer.new()
-	sc.custom_minimum_size = Vector2(0, minf(820.0, root.get_viewport_rect().size.y - 420.0))
-	_fit_scroll.call_deferred(sc, minf(820.0, root.get_viewport_rect().size.y - 420.0))
+	var cap := minf(1000.0, root.get_viewport_rect().size.y - 500.0)
+	sc.custom_minimum_size = Vector2(0, cap)
+	_fit_scroll.call_deferred(sc, cap)
 	sc.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	var list := UI.vbox(12)
 	list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -872,9 +904,11 @@ func _empire(v: VBoxContainer) -> void:
 		var ch: Dictionary = Game.chapters[k]
 		var btn: UIShape
 		var stat: String
+		var extra: Control = null
 		if k == Game.venue:
 			btn = _price_button(0, Callable(), "HERE")
-			stat = "You are here"
+			var pr := Game.passive_rate() * 60.0
+			stat = ("You are here · crew makes %s/min" % UI.cash(pr)) if pr > 0 else "You are here"
 		elif k < Game.unlocked:
 			btn = UI.button("TRAVEL", "green", "", 28, 150)
 			var kk := k
@@ -882,23 +916,59 @@ func _empire(v: VBoxContainer) -> void:
 				close_modal()
 				get_tree().current_scene.travel_to(kk))
 			var r := Game.venue_rate(k) * 60.0 * Game.VENUE_EFFICIENCY
-			stat = ("Earning %s / min" % UI.cash(r)) if r > 0 else "Unlocked · no crew earning yet"
+			stat = ("Earns %s/min while you play" % UI.cash(r)) if r > 0 else "No crew yet: hire some there"
+			extra = _till_meter(k)
 		else:
 			btn = _price_button(0, Callable(), "LOCKED")
-			stat = "Unlock at chapter %d's gate" % k
+			stat = "The land next door: open it at %s's gate" % String(Game.chapters[k - 1].name) if k == Game.unlocked \
+				else "Further down the road"
 		var desc := String(ch.tagline)
 		if ch.has("special"):
 			desc += " · New: " + String(ch.special.name)
 		if k < Game.unlocked:
 			var st: Array = Game.stars(k)
 			stat += "   " + "".join(st.map(func(x): return "★" if x else "☆"))
-		_row(list, "lock" if k >= Game.unlocked else "star", "%d. %s" % [k + 1, ch.name], desc, stat, btn)
+		_row(list, "lock" if k >= Game.unlocked else "star", "%d. %s" % [k + 1, ch.name], desc, stat, btn, extra)
 	if Game.prestige > 0:
 		v.add_child(UI.label("Empire %d · income x%.1f" % [Game.prestige + 1, Game.income_mult()], 22, UI.GOLD_LIGHT, null, HORIZONTAL_ALIGNMENT_CENTER))
 	var cb := UI.button("CLOSE", "dark", "", 28)
 	cb.pressed.connect(close_modal)
 	v.add_child(cb)
 
+
+var _map_tills: Array = []          # [k, Label, ProgressBar] of the open map, updated in place
+
+
+## "Cash waiting $1,240 / $3,600" with a fill bar: place k's counter and how much it holds.
+func _till_meter(k: int) -> Control:
+	var col := UI.vbox(4)
+	col.name = "Till%d" % k
+	var l := UI.label("", 21, UI.CASH, UI.font_ui(650))
+	l.name = "TillText"
+	col.add_child(l)
+	var bar := UI.progress_bar(240, 10)
+	var fg := StyleBoxFlat.new()
+	fg.bg_color = UI.CASH
+	fg.set_corner_radius_all(5)
+	bar.add_theme_stylebox_override("fill", fg)
+	col.add_child(bar)
+	_map_tills.append([k, l, bar])
+	_set_till_meter(k, l, bar)
+	return col
+
+
+func _set_till_meter(k: int, l: Label, bar: ProgressBar) -> void:
+	var t := Game.till(k)
+	var cap := Game.till_cap(k)
+	l.text = ("Cash waiting: %s / %s" % [UI.cash(t), UI.cash(cap)]) + ("  FULL" if t >= cap else "")
+	bar.max_value = maxi(1, cap)
+	bar.value = t
+
+
+func _refresh_map_tills() -> void:
+	for m in _map_tills:
+		if is_instance_valid(m[1]):
+			_set_till_meter(m[0], m[1], m[2])
 
 
 func _hours(h: float) -> String:
@@ -947,6 +1017,7 @@ func _build_task_card() -> void:
 	task_card.add_child(h)
 	reno_chip = UIShape.new("dark", 18.0, Vector4(12, 6, 14, 6))
 	reno_chip.make_clickable()
+	reno_chip.custom_minimum_size.y = 64          # it's a button: keep it a full tap target
 	reno_chip.pressed.connect(func(): open_modal("upgrades"))
 	var rh := UI.hbox(8)
 	rh.add_child(_icon_or("timer", "clock", 30))
@@ -995,6 +1066,7 @@ func _tick_overlays() -> void:
 		bd_info.text = "Served %d / %d   ·   Walkouts %d / %d" % [world.bd_served, world.bd_goal(), world.bd_walkouts, world.bd_max_walkouts()]
 		bd_bar.max_value = world.bd_goal()
 		bd_bar.value = world.bd_served
+	till_chip.visible = till_k >= 0 and not bd_on and modal_kind == ""
 	if _ov_t > 0.0:
 		return
 	_ov_t = 0.25
@@ -1010,6 +1082,81 @@ func _tick_overlays() -> void:
 		var l := Game.reno_left()
 		reno_label.text = "%s → Lv %d · %s" % [String(Game.station_def(Game.reno.id).name), int(Game.reno.to) + 1, _clock(l)]
 		reno_chip.position = Vector2(18, task_card.position.y + task_card.size.y + 10)
+	if Game.venue != _till_venue:          # walked over to another place: its till is now the counter
+		_till_venue = Game.venue
+		_till_dirty = true
+	if _till_dirty:
+		_refresh_till_chip()
+	_place_till_chip()
+
+
+# ------------------------------------------------------------------ cash waiting at your other places
+
+func _build_till_chip() -> void:
+	till_chip = UIShape.new("glass", 22.0, Vector4(14, 8, 18, 8))
+	till_chip.make_clickable()
+	till_chip.name = "TillChip"
+	till_chip.custom_minimum_size = Vector2(0, 66)
+	till_chip.pressed.connect(func():
+		if world.bd_active:
+			return
+		open_modal("empire"))
+	var h := UI.hbox(10)
+	h.alignment = BoxContainer.ALIGNMENT_BEGIN
+	h.add_child(UI.icon("coin", 38))
+	till_label = UI.label("", 24, UI.CASH, UI.font_ui(650))
+	h.add_child(till_label)
+	h.add_child(UI.label("›", 30, Color(1, 1, 1, 0.7), UI.font_bold()))
+	till_chip.add_child(h)
+	root.add_child(till_chip)
+	till_chip.visible = false
+	_refresh_till_chip()
+
+
+## The place with the most cash on its counter (not the one you're at), or -1.
+func _richest_till() -> int:
+	var best := -1
+	var amt := 0
+	for k in Game.unlocked:
+		if k == Game.venue:
+			continue
+		var t := Game.till(k)
+		if t > amt:
+			amt = t
+			best = k
+	return best
+
+
+## Called on tills_changed / state_changed / arriving somewhere (batched to 4x a second), not every frame.
+func _refresh_till_chip() -> void:
+	_till_dirty = false
+	if modal_kind == "empire":
+		_refresh_map_tills()
+	till_k = _richest_till() if Game.tills_waiting() > 0 else -1
+	if till_k < 0:
+		till_chip.visible = false
+		return
+	var txt := "%s waiting at %s" % [UI.cash(Game.till(till_k)), String(Game.chapters[till_k].name)]
+	if till_label.text != txt:
+		till_label.text = txt
+		UI.fit(till_label, _till_max_w(), 24, 18)
+		till_chip.size = Vector2.ZERO
+		till_chip.reset_size()
+	_place_till_chip()
+
+
+## Room left of the side buttons (they sit 118 px in from the right edge).
+func _till_max_w() -> float:
+	# side column, left margin, gap, chip padding, coin icon, two gaps, the arrow
+	return _vw() - 118.0 - 18.0 - 14.0 - 32.0 - 38.0 - 20.0 - 14.0
+
+
+## Under the task card (and the renovation chip when it shows).
+func _place_till_chip() -> void:
+	var y := task_card.position.y + task_card.size.y + 10.0
+	if reno_chip.visible:
+		y = reno_chip.position.y + reno_chip.size.y + 10.0
+	till_chip.position = Vector2(18, y)
 
 
 func _clock(secs: int) -> String:
@@ -1057,7 +1204,7 @@ func _bigday_result(v: VBoxContainer) -> void:
 	v.add_child(row)
 	var txt: String
 	if won:
-		txt = "Big Day won! The road to the next place is open: unlock it at the gate."
+		txt = "Big Day won! You can buy the land next door: unlock it at the gate."
 		if Game.is_last_chapter():
 			txt = "The critic loved it. Finish the empire at the gate!"
 		if not Game.bigday.get("clean", false):
@@ -1389,8 +1536,10 @@ func _howto(v: VBoxContainer) -> void:
 		["dish", "Carry dishes from the rack to the counter. Guests pay; collect the cash pile."],
 		["smile", "Serve fast: happy guests pay +20%, guests you serve in person pay +25%. Slow service and they walk out."],
 		["upgrade", "UPGRADE levels the kitchen, menu, dining and signboard up to Lv 25. Big levels take time to build."],
-		["crew", "Hire crew to keep things running while you play. They're slower than you, so you earn the most when you serve guests yourself."],
-		["bigday", "Build everything, then start the Big Day at the gate to unlock the next place."],
+		["crew", "Hire crew to help. They're slower than you, so you earn the most when you serve guests yourself."],
+		["bigday", "Build everything, then win the Big Day at the gate to buy the land next door."],
+		["gate", "It's one road: walk over to your other places, or tap MAP to jump there."],
+		["coin", "Your other places keep earning while you play. Their cash waits on their counters (up to %d min). Go there to collect it." % int(Game.TILL_CAP_MIN)],
 		["trophy", "Earn 3 stars per place for permanent income bonuses."],
 	]:
 		var h := UI.hbox(14)

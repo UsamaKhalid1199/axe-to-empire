@@ -9,6 +9,7 @@ ticking while you're elsewhere. The player is always the engine of growth: playi
 (Grayline Lumber Co.) is buying up the valley, clear-cutting it and running every place into
 the ground. You win the valley back the other way: chop *and replant*, feed people well,
 hire locals. Each chapter wins over one place and one ally; each ends with a **Big Day**.
+Each new place is the plot next door on the same road: you expand one business, you don't start over.
 
 | # | Venue | Guests | Ally | Story | Big Day |
 |---|---|---|---|---|---|
@@ -87,11 +88,18 @@ Each chapter has an ordered list of 8–12 tasks (build X, hire Y, serve N, reac
 golden tree, win the Big Day…). The current task shows on screen with progress and a cash
 reward, so there is always a clear next job.
 
-### Away earnings
-- 25% of crew income.
-- Cap: 1 h in chapter 1, +30 min per unlocked venue, max 4 h.
-- The game truly pauses when the phone locks or the app goes to the background (audio stops,
-  nothing ticks). The away payout is computed once on return.
+### One world, earn while you play
+- The six places sit side by side along one road. Winning a Big Day lets you buy the land next
+  door and expand; you walk over (or jump there with MAP). Nothing is "from scratch": your cash,
+  tools, bag and boots come with you, and every place you own keeps running.
+- While you play, each place you're not at earns 50% of its crew rate (`Game.VENUE_EFFICIENCY`).
+  That cash piles up on that place's own counter (its *till*), up to 20 minutes of its rate
+  (`Game.TILL_CAP_MIN`). Walk over to collect it.
+- The HUD shows a "$X waiting at <place>" chip (the place with the most) under the task card;
+  tapping it opens MAP, which lists each place's till, its cap and what it earns per minute.
+- No away earnings: nothing piles up while the app is closed (`offline.enabled = false`). The game
+  truly pauses when the phone locks or the app goes to the background (audio stops, nothing ticks).
+  Renovation timers use real time, so they still finish.
 
 ### Daily layer
 Daily jobs, a 7-day streak chest, renovation timers finishing.

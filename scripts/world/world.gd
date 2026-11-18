@@ -5,6 +5,9 @@ signal zone_entered(kind: String, id: String)
 signal zone_exited(kind: String, id: String)
 signal float_text(text: String, world_pos: Vector3, color: Color)
 signal big_day_finished(won: bool, served: int, goal: int)
+## The player walked along the road into the plot next door (chapter k); main.gd switches venue.
+## `arrive` = where to put them there: {x, z, yaw, logs}.
+signal cross_requested(k: int, arrive: Dictionary)
 
 const SPAWN := Vector3(0, 0, -3.6)
 var LOW_END := OS.has_feature("mobile")
@@ -84,6 +87,16 @@ var bd_walkouts := 0
 var bd_scores: Array = []
 var bd: Dictionary = {}
 var _bd_cool := 0.0
+# one road: the plots next door (see plot.gd / neighbor_plot.gd)
+var arrival: Dictionary = {}       # set before building: where the player enters this plot {x, z, yaw, logs}
+var nb_plots: Dictionary = {}      # side (-1 west, +1 east) -> NeighborPlot
+var _gap_shapes: Dictionary = {}   # side -> CollisionShape3D closing the road at that plot edge
+var _nb_unlocked := -1
+var _cross_armed := true           # false right after arriving at an edge, until the player steps inside
+var _crossing := false
+var _edge_warn_ms := -100000
+var _edge_warn_msg := ""
+var fence_zone: Zone               # gate prompt at a FOR SALE neighbour's fence
 
 
 func _tc(key: String, def: Color) -> Color:
@@ -93,6 +106,7 @@ func _tc(key: String, def: Color) -> Color:
 
 ## When true, main.gd drives the build step by step (so the loading bar moves).
 var staged := false
+var build_ms: Dictionary = {}       # step -> ms of the last unstaged build (walking into the next plot)
 
 
 func _ready() -> void:
@@ -102,7 +116,9 @@ func _ready() -> void:
 		process_mode = Node.PROCESS_MODE_DISABLED
 		return
 	for st in build_steps():
+		var t0 := Time.get_ticks_usec()
 		st[1].call()
+		build_ms[String(st[0]).get_slice(" ", 0)] = (Time.get_ticks_usec() - t0) / 1000.0
 
 
 ## [label, step] pairs; run in order to build the venue.
@@ -113,6 +129,7 @@ func build_steps() -> Array:
 		["Planting the forest", _forest],
 		["Scattering the wilds", _decor],
 		["Raising the camp", _static_camp],
+		["Walking the road", _neighbours],
 		["Waking the crew", _finish_build],
 	]
 
@@ -129,6 +146,14 @@ func _finish_build() -> void:
 	ChopTree.woken.clear()
 	add_child(player)
 	player.global_position = SPAWN
+	if not arrival.is_empty():
+		# came along the road (or by MAP) from the plot next door: enter at that edge, facing inward
+		player.global_position = Vector3(float(arrival.x), 0, float(arrival.z))
+		player.rig.rotation.y = float(arrival.get("yaw", 0.0))
+		var logs := mini(int(arrival.get("logs", 0)), Game.bag_cap())
+		if logs > 0:
+			player.back.set_count(logs)
+		_cross_armed = false
 	cam = Camera3D.new()
 	var vsz := get_viewport().get_visible_rect().size
 	cam.fov = 56.0 if vsz.x / maxf(1.0, vsz.y) < 0.5 else 52.0     # tall 20:9 phones: a bit wider so edge labels fit
@@ -158,7 +183,7 @@ func _finish_build() -> void:
 		Game.save_game()
 	if Game.head_start_note:
 		Game.head_start_note = false
-		Game.toast.emit("New place! Your %s came with you, and your crew set up the %s" % [UI.cash(Game.coins), String(Game.build_def("campfire").name).to_lower()])
+		Game.toast.emit("Welcome next door! Your %s came with you, and your crew set up the %s." % [UI.cash(Game.coins), String(Game.build_def("campfire").name).to_lower()])
 		var intro := String(Game.special_def().get("intro", ""))
 		if intro != "":
 			Game.toast.emit(intro)
@@ -212,50 +237,15 @@ func _env() -> void:
 
 
 func _ground() -> void:
-	var img := Image.create(256, 256, false, Image.FORMAT_L8)
-	var patches: Array = Game.chapter().get("ground_patches", [])   # [x, z, rx, rz] worn dirt: car park, plaza, station yards
-	for y in 256:
-		for x in 256:
-			var wx := -40.0 + (x + 0.5) * 80.0 / 256.0
-			var wz := -40.0 + (y + 0.5) * 80.0 / 256.0
-			var v := 0.0
-			# camp clearing
-			var cx := (wx - 1.2) / 8.6
-			var cz := (wz - 3.0) / 7.2
-			v = maxf(v, 1.0 - sqrt(cx * cx + cz * cz))
-			# road
-			v = maxf(v, 1.0 - absf(wz - ROAD_Z) / 1.8)
-			# path to truck
-			v = maxf(v, _seg(wx, wz, Vector2(-1, 2), Vector2(-7, 3.4), 1.3))
-			# trail into the forest
-			v = maxf(v, _seg(wx, wz, Vector2(-0.5, -2), Vector2(-1.5, -12), 1.1) * 0.8)
-			v = maxf(v, _seg(wx, wz, Vector2(1.5, 1), Vector2(6.3, 3.4), 1.0))
-			for pt in patches:
-				var px := (wx - float(pt[0])) / float(pt[2])
-				var pz := (wz - float(pt[1])) / float(pt[3])
-				v = maxf(v, (1.0 - sqrt(px * px + pz * pz)) * 1.4)
-			img.set_pixel(x, y, Color(clampf(v * 1.8, 0, 1), 0, 0))
-	var mask := ImageTexture.create_from_image(img)
-	var mat := Art.shader_mat("res://shaders/ground.gdshader")
-	mat.set_shader_parameter("grass_alb", Art.tex("res://assets/textures/leafy_grass_diff.jpg"))
-	if not LOW_END:
-		mat.set_shader_parameter("grass_nor", Art.tex("res://assets/textures/leafy_grass_nor.jpg"))
-	mat.set_shader_parameter("dirt_alb", Art.tex("res://assets/textures/forrest_ground_01_diff.jpg"))
-	if not LOW_END:
-		mat.set_shader_parameter("dirt_nor", Art.tex("res://assets/textures/forrest_ground_01_nor.jpg"))
-	mat.set_shader_parameter("mask_tex", mask)
-	mat.set_shader_parameter("noise_tex", Art.noise())
-	mat.set_shader_parameter("lite", LOW_END)
-	mat.set_shader_parameter("grass_tint", _tc("grass", Color(0.80, 1.0, 0.55)))
-	mat.set_shader_parameter("dirt_tint", _tc("dirt", Color(1.05, 0.97, 0.9)))
-	var mi := MeshInstance3D.new()
-	var pm := PlaneMesh.new()
-	pm.size = Vector2(80, 80)
-	pm.subdivide_width = 4
-	pm.subdivide_depth = 4
-	mi.mesh = pm
-	mi.material_override = mat
-	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	# this plot's ground stops where a neighbour's begins (both share the edge vertices: no seam, no overlap)
+	var x0 := Plot.west(Game.venue) if Plot.neighbour(Game.venue, -1) >= 0 else -40.0
+	var x1 := Plot.east(Game.venue) if Plot.neighbour(Game.venue, 1) >= 0 else Plot.mask_x(Game.venue).y
+	var gm := Plot.ground_mat(Game.venue, 0.0, false, LOW_END)
+	for side in [-1, 1]:
+		var nk := Plot.neighbour(Game.venue, side)
+		if nk >= 0:
+			Plot.blend_edge(gm, side, x0 if side < 0 else x1, nk)
+	var mi := Plot.ground_plane(x0, x1, gm)
 	add_child(mi)
 	var sb := StaticBody3D.new()
 	var cs := CollisionShape3D.new()
@@ -265,17 +255,35 @@ func _ground() -> void:
 	add_child(sb)
 	if theme.get("water", false):
 		_lake()
-	# invisible walls keep the player in the play area
-	for w in [[Vector3(0, 1, -27), Vector3(40, 2, 1)], [Vector3(0, 1, 14.5), Vector3(40, 2, 1)],
-			[Vector3(-15.5, 1, 0), Vector3(1, 2, 60)], [Vector3(15.5, 1, 0), Vector3(1, 2, 60)]]:
-		_collider(w[0], w[1])
+	# invisible walls keep the player in the play area; the road runs on through a gap at each side edge,
+	# closed by a toggled collider unless you can walk into the plot next door
+	var we := Plot.west(Game.venue)
+	var ee := Plot.east(Game.venue)
+	var gz := Plot.ROAD_GAP
+	_collider(Vector3(0, 1, -27), Vector3(40, 2, 1))
+	_collider(Vector3((we + ee) * 0.5, 1, 14.5), Vector3(ee - we + 12.0, 2, 1))
+	for x in [-15.5, 15.5]:
+		_collider(Vector3(x, 1, (gz.x - 30.0) * 0.5), Vector3(1, 2, gz.x + 30.0))
+	if ee > 15.6:
+		_collider(Vector3((15.5 + ee) * 0.5, 1, gz.x - 0.5), Vector3(ee - 15.5, 2, 1))    # lakeshore road
+	for side in [-1, 1]:
+		var sb2 := StaticBody3D.new()
+		var cs2 := CollisionShape3D.new()
+		var bs := BoxShape3D.new()
+		bs.size = Vector3(1, 2, gz.y - gz.x + 0.4)
+		cs2.shape = bs
+		sb2.add_child(cs2)
+		sb2.position = Vector3(we if side < 0 else ee, 1, (gz.x + gz.y) * 0.5)
+		sb2.name = "RoadGap_%s" % ("west" if side < 0 else "east")
+		add_child(sb2)
+		_gap_shapes[side] = cs2
 
 
 ## Lakeside chapter: a lake along the east edge with a small dock.
 func _lake() -> void:
 	var w := MeshInstance3D.new()
 	var pm := PlaneMesh.new()
-	pm.size = Vector2(26, 60)
+	pm.size = Vector2(26, 43.3)       # north of the road: the road runs on along the shore
 	w.mesh = pm
 	var m := StandardMaterial3D.new()
 	m.albedo_color = Color(0.12, 0.32, 0.42)
@@ -283,16 +291,24 @@ func _lake() -> void:
 	m.metallic = 0.35
 	m.metallic_specular = 0.8
 	w.material_override = m
-	w.position = Vector3(29.5, 0.04, -4)
+	w.position = Vector3(29.5, 0.04, -12.35)
 	w.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(w)
 	var shore := MeshInstance3D.new()
 	var sp := PlaneMesh.new()
-	sp.size = Vector2(1.6, 60)
+	sp.size = Vector2(1.6, 43.3)
 	shore.mesh = sp
 	shore.material_override = Art.paint(Color(0.62, 0.55, 0.42), 0.95)
-	shore.position = Vector3(16.3, 0.03, -4)
+	shore.position = Vector3(16.3, 0.03, -12.35)
 	add_child(shore)
+	var shore2 := MeshInstance3D.new()
+	var sp2 := PlaneMesh.new()
+	sp2.size = Vector2(26.2, 0.5)
+	shore2.mesh = sp2
+	shore2.material_override = shore.material_override
+	shore2.position = Vector3(29.6, 0.03, 9.45)
+	shore2.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(shore2)
 	var dock := Art.box(Vector3(5.0, 0.12, 1.4), Art.plank_mat(), Vector3(18.5, 0.25, 4.0), self)
 	dock.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
 	for x in [16.5, 18.5, 20.5]:
@@ -382,11 +398,41 @@ func _decor() -> void:
 			_: p = Vector3(rng.randf_range(-22, 22), 0, rng.randf_range(16.5, 23))   # clear of the road and car lane
 		var mesh: Mesh = Art.broadleaf_mesh(rng.randi() % 3) if rng.randf() < 0.45 else Art.pine_mesh(rng.randi() % 4)
 		var xf := Transform3D(Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3.ONE * rng.randf_range(1.1, 1.7)), p)
+		if not _decor_clear(p):
+			continue
 		# one MultiMesh per (mesh, side of the map) so sides off screen are culled
 		var gk := [mesh, side]
 		if not groups.has(gk):
 			groups[gk] = []
 		groups[gk].append(xf)
+	# the plots next door: their forest behind the camp and a tree line south of the road (same MultiMeshes)
+	for side in [-1, 1]:
+		if Plot.neighbour(Game.venue, side) < 0:
+			continue
+		var edge := Plot.west(Game.venue) if side < 0 else Plot.east(Game.venue)
+		var n := 12 if LOW_END else 22
+		for i in n:
+			var south := i % 3 == 2
+			# south of the road only past the old tree band (|x| > 22): near the edge they would hide the road
+			var p := Vector3(edge + side * rng.randf_range(7.0 if south else 0.6, Plot.NB_DEPTH),
+				0, rng.randf_range(17.5, 23.0) if south else rng.randf_range(-30.0, -7.0))
+			if south and absf(p.x) < 22.0:
+				continue
+			var mesh: Mesh = Art.broadleaf_mesh(rng.randi() % 3) if rng.randf() < 0.45 else Art.pine_mesh(rng.randi() % 4)
+			var xf := Transform3D(Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3.ONE * rng.randf_range(1.1, 1.7)), p)
+			if not _decor_clear(p):
+				continue
+			var gk := [mesh, 3 if south else (0 if side < 0 else 1)]
+			if not groups.has(gk):
+				groups[gk] = []
+			groups[gk].append(xf)
+	if Plot.east(Game.venue) > 30.0:
+		for i in 8:     # south of the lakeshore road
+			var p := Vector3(rng.randf_range(22.0, Plot.east(Game.venue) - 1.0), 0, rng.randf_range(16.5, 23.0))
+			var gk := [Art.pine_mesh(i % 4), 3]
+			if not groups.has(gk):
+				groups[gk] = []
+			groups[gk].append(Transform3D(Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3.ONE * rng.randf_range(1.1, 1.7)), p))
 	for gk in groups:
 		var mm := MultiMesh.new()
 		mm.transform_format = MultiMesh.TRANSFORM_3D
@@ -527,6 +573,28 @@ func _shadows_off(n: Node) -> void:
 		_shadows_off(c)
 
 
+## Edge-forest spots that stay empty: the road where it runs on into a neighbour, and the neighbour's camp
+## (its forest, behind its camp, is kept: it reads as the next place's woods). Not on a neighbour's lake.
+func _decor_clear(p: Vector3) -> bool:
+	for side in [-1, 1]:
+		var k := Plot.neighbour(Game.venue, side)
+		if k < 0:
+			continue
+		var edge := Plot.west(Game.venue) if side < 0 else Plot.east(Game.venue)
+		# the tree band south of the road stands right under the camera: near the edge it would hide the
+		# player walking across, so keep it back there
+		if p.z > 14.5 and p.z < 20.5 and absf(p.x - edge) < 6.5:
+			return false
+		var beyond := p.x < edge + 0.4 if side < 0 else p.x > edge - 0.4
+		if not beyond:
+			continue
+		if p.z > -6.5 and p.z < 16.0:
+			return false
+		if Game.chapters[k].get("theme", {}).get("water", false) and p.x - Plot.offset(Game.venue, k) > 15.0 and p.z < 10.0:
+			return false
+	return true
+
+
 func _near_camp(p: Vector3) -> bool:
 	# the east side (x 9..15) hosts each chapter's signature station
 	return (p.x > -9 and p.x < 15.5 and p.z > -4 and p.z < 14) or absf(p.z - ROAD_Z) < 2.6
@@ -663,6 +731,117 @@ func _chapter_props() -> void:
 				add_child(bush)
 
 
+# ------------------------------------------------------------------ one road: the plots next door
+
+func _exit_tree() -> void:
+	Plot.finish_jobs()          # never leave a ground-mask job running past this venue (or app exit)
+
+
+## Builds (or rebuilds, when a gate opens) the static pictures of the plots west and east of this one.
+func _neighbours() -> void:
+	_nb_unlocked = Game.unlocked
+	for side in [-1, 1]:
+		var k := Plot.neighbour(Game.venue, side)
+		if nb_plots.has(side):
+			nb_plots[side].queue_free()
+			nb_plots.erase(side)
+		if k < 0:
+			continue
+		var np := NeighborPlot.new().setup(self, k, side)
+		add_child(np)
+		nb_plots[side] = np
+	# the plots two steps away: their ground masks get computed on a worker thread now, so walking on is quick
+	var want: Array = []
+	for side in [-1, 1]:
+		var k1 := Plot.neighbour(Game.venue, side)
+		if k1 < 0:
+			continue
+		want.append([k1, false])
+		var k2 := Plot.neighbour(k1, side)
+		if k2 >= 0:
+			want.append([k2, not (k2 < Game.unlocked and k2 < Game.venues.size() and not Game.venues[k2].is_empty())])
+			want.append([k2, false])
+	Plot.prefetch(want)
+	if is_instance_valid(player):
+		_sync_fence_zone()
+
+
+## Can the player walk into the plot on that side right now? (owned, and no Big Day running)
+func can_cross(side: int) -> bool:
+	var k := Plot.neighbour(Game.venue, side)
+	return k >= 0 and k < Game.unlocked and not bd_active
+
+
+## A FOR SALE neighbour gets a gate prompt at its fence once the gate pad is up (same modal as the pad).
+func _sync_fence_zone() -> void:
+	var k := Plot.neighbour(Game.venue, -1)
+	var want := k >= 0 and k >= Game.unlocked and pads.has("gate")
+	if want == (fence_zone != null):
+		return
+	if want:
+		fence_zone = _zone("gate_fence", "gate", Vector3(Plot.west(Game.venue) + 1.35, 0, ROAD_Z), Vector2(1.5, 2.6),
+			Color("#8EE07A"), "", "res://assets/icons/gate.svg", true)
+	else:
+		zones.erase(fence_zone)
+		fence_zone.queue_free()
+		fence_zone = null
+
+
+## Road edges: open/close the gaps, hand the player over to the next plot, explain a closed way.
+func _road_tick() -> void:
+	for side in _gap_shapes:
+		var shut := not can_cross(side)
+		var cs: CollisionShape3D = _gap_shapes[side]
+		if cs.disabled == shut:
+			cs.set_deferred("disabled", not shut)
+	if _crossing:
+		return
+	var pp := player.global_position
+	var we := Plot.west(Game.venue)
+	var ee := Plot.east(Game.venue)
+	if not _cross_armed:
+		_cross_armed = pp.x > we + 1.2 and pp.x < ee - 1.2
+		return
+	if pp.z < Plot.ROAD_GAP.x or pp.z > Plot.ROAD_GAP.y:
+		return
+	for side in [-1, 1]:
+		var d := pp.x - we if side < 0 else ee - pp.x       # distance to that edge
+		if d > 0.9:
+			continue
+		if can_cross(side):
+			if d < 0.35:
+				_cross(side)
+			return
+		# pushing against a closed way
+		var k := Plot.neighbour(Game.venue, side)
+		if k < 0 or player._vel.x * side < 0.5:
+			continue
+		var msg := "Finish the Big Day first!" if bd_active else "%s is for sale: open the gate to buy it" % String(Game.chapters[k].name)
+		var now_ms := Time.get_ticks_msec()
+		if now_ms - _edge_warn_ms < 4000 and msg == _edge_warn_msg:
+			continue
+		_edge_warn_ms = now_ms
+		_edge_warn_msg = msg
+		Game.toast.emit(msg)
+
+
+func _cross(side: int) -> void:
+	var k := Plot.neighbour(Game.venue, side)
+	_crossing = true
+	var dir := float(side)
+	var x := Plot.east(k) - 0.6 if side < 0 else Plot.west(k) + 0.6
+	cross_requested.emit(k, {"x": x, "z": clampf(player.global_position.z, 10.0, 13.6), "yaw": atan2(dir, 0.0),
+		"logs": player.back.count()})
+
+
+## Where a MAP / gate trip from chapter `from` puts you in chapter k: on the road at the side you came from.
+static func map_arrival(from: int, k: int) -> Dictionary:
+	if from == k:
+		return {}
+	var east_side := k > from          # higher chapters lie further west: you come in from their east
+	return {"x": 11.0 if east_side else -11.0, "z": ROAD_Z, "yaw": -PI / 2 if east_side else PI / 2}
+
+
 func _zone(id: String, kind: String, pos: Vector3, size: Vector2, color: Color, text := "", icon := "", dashed := false) -> Zone:
 	var z := Zone.new()
 	add_child(z)
@@ -676,6 +855,8 @@ func _zone(id: String, kind: String, pos: Vector3, size: Vector2, color: Color, 
 
 func _on_state_changed() -> void:
 	_rebuild_all(true)
+	if Game.unlocked != _nb_unlocked:
+		_neighbours()          # a gate opened: the FOR SALE plot next door is yours now
 
 
 func _rebuild_all(animate: bool) -> void:
@@ -692,6 +873,7 @@ func _rebuild_all(animate: bool) -> void:
 		if not pads.has(id) and (Game.build_available(id) or (id == "gate" and Game.built.has("gate"))):
 			_spawn_pad(id, animate)
 	_sync_workers()
+	_sync_fence_zone()
 
 
 func _spawn_pad(id: String, animate: bool) -> void:
@@ -1314,6 +1496,7 @@ func _process(delta: float) -> void:
 	_golden_tick(delta)
 	_bd_tick(delta)
 	specials.tick(delta)
+	_road_tick()
 	_cam_tick(delta)
 	_obj_t -= delta
 	if _obj_t <= 0.0:
@@ -1511,7 +1694,11 @@ func _spawn_passer() -> void:
 	var cu := Customer.new().setup_passer(self, cust_seed + randi() % 1000)
 	add_child(cu)
 	cu.global_position = ROAD_EAST + Vector3(0, 0, randf_range(0.0, 0.5))
-	cu.go([Vector3(COUNTER_POS.x + 2.5, 0, ROAD_Z + 0.2), Vector3(-22, 0, ROAD_Z + 0.3)])
+	var end_x := -22.0
+	var wk := Plot.neighbour(Game.venue, -1)
+	if wk >= Game.unlocked:
+		end_x = Plot.west(Game.venue) + 0.8          # the way west is fenced off
+	cu.go([Vector3(COUNTER_POS.x + 2.5, 0, ROAD_Z + 0.2), Vector3(end_x, 0, ROAD_Z + 0.3)])
 	cu.tree_exited.connect(func(): passers -= 1)
 	var tw := cu.create_tween()
 	tw.tween_interval(4.5)

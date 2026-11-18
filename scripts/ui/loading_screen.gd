@@ -18,8 +18,10 @@ const TIPS := [
 	"Happy guests pay 20% more. Don't keep them waiting!",
 	"Stand at the counter: guests you serve yourself pay 25% more.",
 	"Golden trees are worth a fortune. Chop them before they fade.",
-	"Big upgrades take time to build. They finish even while you're away.",
-	"Win the Big Day to open the road to the next place.",
+	"Big upgrades take time to build. The place keeps running meanwhile.",
+	"Your other places keep earning while you play. Walk over to collect.",
+	"Cash waits on each counter for up to 20 minutes. Visit to collect it.",
+	"Win the Big Day, then buy the land next door and expand.",
 	"Three stars per place: every star adds income everywhere.",
 	"A full line turns guests away. More fires and upgrades fix that.",
 ]
