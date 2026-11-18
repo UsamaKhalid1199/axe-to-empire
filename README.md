@@ -90,7 +90,7 @@ Places you're not at earn 50% of the conservative crew model in `Game._rate()`, 
 | `data/outfits.json` | Wardrobe items (shirts, hats, pants), prices and star gates |
 | `docs/DESIGN.md` | Game design: story, loop, moods, crew vs player, stations, stars, roadmap |
 | `scripts/core/game_state.gd` | Autoload `Game`: economy, chapter config scaling, per-venue state, empire income, prestige, save/load + migration, offline earnings, jobs |
-| `scripts/main.gd` | Boot, threaded preloading, staged venue build behind the loading screen, travel, graphics quality + auto downgrade |
+| `scripts/main.gd` | Boot, threaded preloading, staged venue build behind the loading screen, the quick place swap for walking and MAP travel, graphics quality (first-launch pick + auto downgrade) |
 | `scripts/world/` | World build, player, crew/customers, trees, procedural art, character rig (two-hand chainsaw IK), `specials.gd` (each chapter's signature station) |
 | `scripts/ui/` | HUD, modals (shop, crew, gate, chapter complete, empire map, settings), loading screen, UI shapes |
 | `shaders/` | Ground, foliage (+ see-through variant for trees covering the player), UI |
@@ -109,6 +109,7 @@ $G --headless --path . --script res://tests/audittest.gd            # regression
 $G --headless --path . -s res://tests/upgradetest.gd -- <chapter>   # every upgrade measured in game + live income/payback per station
 $G --headless --path . -s res://tests/qa/qa4_input.gd               # taps: X buttons, second finger, taps during rebuild/close/double-tap
 $G --headless --path . -s res://tests/qa/chapters_flow.gd           # next/previous chapter, travel, save/load, migration (~110 checks)
+$G --headless --path . -s res://tests/qa/cross_timing.gd            # walk 1-0-1-2-1 x5 + a first visit + MAP: black / build / stall ms
 $G --headless --path . --script res://tests/regrowtest.gd           # stumps wait until the player leaves
 $G --headless --path . --script res://tests/harvtest.gd             # ride the harvester in the forest, walk in camp
 $G --headless --path . --script res://tests/specialtest.gd -- 1     # signature station of chapter 1..5 (player + crew)
@@ -145,8 +146,17 @@ Draw-call and skinning budget (on the test phone with a full camp: ~480 -> ~200 
 - Per-frame loops only touch what can change: the see-through/batching pass over trees looks at trees near the
   player, out of the batch or just hit (`ChopTree.woken`); guest bubbles rewrite their Label3D only on change.
 - Debug builds: `adb shell run-as com.bigosoft.axetoempire.proto touch files/probe` makes the next launch cycle
-  through ablations (no characters, no trees, ...) and log `PROBE <name> fps=` lines.
+  through ablations (no characters, no trees, ...) and log `PROBE <name> fps=` lines; `touch files/autowalk` makes
+  it walk across a plot edge every 7 s (and take a MAP trip every 12th time), logging `CROSS`, `AFTER` and `MAPT` lines.
+- Walking into the next plot and MAP travel use one quick swap (`main._swap`): the place you leave is frozen as a
+  still picture while the screen dims and the next place builds behind it a few steps per frame, one frame of it is
+  drawn off screen (`_prewarm`), and under black the two only trade places; the HUD stays and rebinds. The old
+  place is freed a few nodes per frame afterwards, so shared materials and shaders never drop out of use (a
+  dropped shader is recompiled on the phone). Many-part props and the character rig are packed once and
+  instantiated (`Art._tmpl`, `CharacterRig._stripped_scene`); a neighbour's baked picture does not depend on its
+  woodpile (the logs are a MultiMesh), so walking back and forth reuses it.
 
 Mobile settings: 30 fps cap, 3D render scale per graphics level (Smooth 0.6 / Balanced 0.75 / Beautiful 0.9),
-no MSAA, no realtime shadows or omni lights, vertex shading, 1K textures, arm64 only. If fps stays under 17 the
-game drops one graphics level automatically (Settings > Graphics turns that off).
+no MSAA, no realtime shadows or omni lights, vertex shading, 1K textures, arm64 only. Entry-level GPUs (PowerVR,
+Mali-4xx/T/G31-G52, Adreno below 610, or under 3.5 GB RAM) start on Smooth. If fps stays under 19 the game drops
+one graphics level automatically (choosing a level in Settings > Graphics turns that off).

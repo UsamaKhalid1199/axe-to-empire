@@ -10,6 +10,7 @@ var label: Label3D
 var icon: Sprite3D
 var tick := 0.0           # caller-owned timer
 var occupied := false
+var reach := 0.0          # metres past the pad's edge that still count as on it (the player's body overlapping it)
 
 
 func setup(zone_id: String, zone_kind: String, sz: Vector2, color: Color, text := "", icon_path := "", dashed := false) -> Zone:
@@ -71,4 +72,4 @@ func set_active(on: bool) -> void:
 
 func contains(p: Vector3) -> bool:
 	var l := p - global_position
-	return absf(l.x) <= size.x * 0.5 and absf(l.z) <= size.y * 0.5
+	return absf(l.x) <= size.x * 0.5 + reach and absf(l.z) <= size.y * 0.5 + reach

@@ -9,7 +9,7 @@ class_name Plot
 
 const ROAD_Z := 11.5
 const PLOT_HALF := 15.5            # standard plot: x in [-15.5, 15.5] (the play area walls)
-const LAKE_EAST := 43.5            # the Lakeside plot runs on along the lakeshore road to here
+const LAKE_EAST := 31.5            # the Lakeside plot runs on along the lakeshore road to here (16 m of shore)
 const ROAD_GAP := Vector2(9.6, 14.0)   # z range of the road opening at a plot edge
 const NB_DEPTH := 26.0             # how far into a neighbour its ground (and props) are drawn
 
@@ -219,17 +219,17 @@ static func ground_plane(x0: float, x1: float, mat: Material) -> MeshInstance3D:
 ## shore (the dock and the raft) and wide, slightly wavy rounded corners in the east, where the lakeshore road
 ## ends. Signed distance in metres (< 0 = water), shared by the water mesh and the shore in the ground mask.
 const LAKE_MIN := Vector2(16.5, -34.0)
-const LAKE_MAX := Vector2(42.5, 9.3)
+const LAKE_MAX := Vector2(30.5, 9.3)
 
 
 static func lake_sd(x: float, z: float) -> float:
 	var c := (LAKE_MIN + LAKE_MAX) * 0.5
 	var half := (LAKE_MAX - LAKE_MIN) * 0.5
-	var r := 9.0 if x > c.x else 1.0
+	var r := 5.5 if x > c.x else 1.0
 	var q := Vector2(absf(x - c.x), absf(z - c.y)) - half + Vector2(r, r)
 	var d := Vector2(maxf(q.x, 0.0), maxf(q.y, 0.0)).length() + minf(maxf(q.x, q.y), 0.0) - r
 	# gentle waves along the south and east shores (none by the dock)
-	return d + 0.35 * sin(x * 0.55 + 1.3) * sin(z * 0.45 + 0.4) * smoothstep(20.0, 26.0, x)
+	return d + 0.35 * sin(x * 0.55 + 1.3) * sin(z * 0.45 + 0.4) * smoothstep(19.0, 24.0, x)
 
 
 ## The water surface: a fan from the middle out to where lake_sd = 0 (cached; one draw).
@@ -271,6 +271,66 @@ static func lake_mesh() -> ArrayMesh:
 		m.cull_mode = BaseMaterial3D.CULL_DISABLED      # (winding-proof: it is only ever seen from above)
 		am.surface_set_material(0, m)
 		return am)
+
+
+## Low dressing along the lakeshore road, in the Lakeside plot's coordinates: a fishing jetty with a rowboat
+## tied to it, reed clumps at the water's edge and a few ducks. Baked flat once per session (one or two draws),
+## shared by the Lakeside plot itself and its picture next door.
+static func lake_dressing() -> MeshInstance3D:
+	var mesh: Mesh = Art._c("lake_dressing", func():
+		var n := Node3D.new()
+		var plank := Art.plank_mat()
+		var post := Art.pbr("bark_brown_02")
+		var jx := 24.5
+		Art.box(Vector3(1.3, 0.1, 4.4), plank, Vector3(jx, 0.3, 7.4), n)             # z 5.2 .. 9.6, over the water
+		for z in [5.5, 7.4, 9.3]:
+			for dx in [-0.6, 0.6]:
+				Art.cylinder(0.07, 0.75, post, Vector3(jx + dx, 0.1, z), n, 6)
+		Art.cylinder(0.05, 0.9, post, Vector3(jx - 0.5, 0.75, 5.4), n, 6)             # a fishing rod...
+		var rod := Art.cylinder(0.015, 2.2, Art.paint(Color(0.2, 0.15, 0.1), 0.6), Vector3(jx - 0.5, 1.4, 4.6), n, 4)
+		rod.rotation.x = -1.0
+		var boat := Node3D.new()
+		boat.position = Vector3(jx + 1.55, 0.04, 6.4)
+		boat.rotation.y = 0.14
+		n.add_child(boat)
+		var hull := Art.paint(Color(0.18, 0.4, 0.58), 0.6)
+		Art.box(Vector3(0.95, 0.28, 2.3), hull, Vector3(0, 0.14, 0), boat)
+		Art.box(Vector3(0.7, 0.3, 0.5), hull, Vector3(0, 0.16, 1.3), boat).rotation.x = 0.35
+		Art.box(Vector3(0.75, 0.06, 2.1), Art.paint(Color(0.92, 0.9, 0.84), 0.7), Vector3(0, 0.3, 0), boat)
+		Art.box(Vector3(0.8, 0.05, 0.3), plank, Vector3(0, 0.36, 0.1), boat)
+		var oar := Art.box(Vector3(0.08, 0.04, 1.8), plank, Vector3(0.2, 0.4, -0.3), boat)
+		oar.rotation.y = 0.25
+		# reeds along the water's edge, thicker toward the east end
+		var rng := RandomNumberGenerator.new()
+		rng.seed = 77
+		var reed := Art.band_mesh("reeds")
+		for i in 26:
+			var x := lerpf(17.2, LAKE_MAX.x - 0.6, pow(rng.randf(), 0.7))
+			if absf(x - jx) < 1.4 or absf(x - jx - 1.55) < 1.0:
+				continue
+			var mi := MeshInstance3D.new()
+			mi.mesh = reed
+			var sc := rng.randf_range(1.0, 1.6)
+			mi.transform = Transform3D(Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3(sc, rng.randf_range(1.0, 1.5), sc)),
+				Vector3(x, 0, rng.randf_range(8.2, 9.3)))
+			n.add_child(mi)
+		# a family of ducks out on the water
+		var white := Art.paint(Color(0.96, 0.95, 0.9), 0.7)
+		var beak := Art.paint(Color(0.95, 0.6, 0.1), 0.6)
+		for d in [Vector3(20.5, 0, 5.8), Vector3(21.3, 0, 6.3), Vector3(21.9, 0, 6.0), Vector3(27.6, 0, 3.0)]:
+			var s := 1.0 if d.x < 27.0 else 1.25
+			Art.box(Vector3(0.22, 0.12, 0.34) * s, white, d + Vector3(0, 0.08, 0), n)
+			Art.box(Vector3(0.12, 0.12, 0.12) * s, white, d + Vector3(0, 0.2, 0.14) * s, n)
+			Art.box(Vector3(0.06, 0.04, 0.08) * s, beak, d + Vector3(0, 0.2, 0.23) * s, n)
+		var baked := Art.bake_flat(n)
+		var m: Mesh = baked.mesh
+		n.free()
+		return m)
+	var mi := MeshInstance3D.new()
+	mi.name = "LakeDressing"
+	mi.mesh = mesh
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	return mi
 
 
 static func lake_node() -> MeshInstance3D:
@@ -401,13 +461,21 @@ static func band_node(k: int, x0: float, x1: float) -> Node3D:
 ## The band merged into one plain mesh per prop type, for a neighbour's flat bake (Art.bake_flat folds them into
 ## its baked mesh: no extra draws there).
 static func band_meshes(k: int, x0: float, x1: float, parent: Node3D) -> void:
-	for e in band(k, x0, x1):
-		var st := SurfaceTool.new()
-		st.begin(Mesh.PRIMITIVE_TRIANGLES)
-		for xf in e[1]:
-			st.append_from(e[0], 0, xf)
+	# merged once per session and stretch of road (a neighbour's picture is rebaked whenever what is built there
+	# changes; its band never does)
+	var meshes: Array = Art._c("band:%d:%s:%s" % [k, x0, x1], func():
+		var out: Array = []
+		for e in band(k, x0, x1):
+			var st := SurfaceTool.new()
+			st.begin(Mesh.PRIMITIVE_TRIANGLES)
+			for xf in e[1]:
+				st.append_from(e[0], 0, xf)
+			var m := st.commit()
+			m.surface_set_material(0, Art.band_mat())
+			out.append(m)
+		return out)
+	for m in meshes:
 		var mi := MeshInstance3D.new()
-		mi.mesh = st.commit()
-		mi.mesh.surface_set_material(0, Art.band_mat())
+		mi.mesh = m
 		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		parent.add_child(mi)

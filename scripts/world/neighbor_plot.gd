@@ -62,6 +62,7 @@ func _ready() -> void:
 		if _bakes.size() > 16:
 			_bakes.clear()
 		_bakes[key] = baked.mesh
+	_log_pile()
 	_sign_labels()
 	_labels()
 	Game.tills_changed.connect(refresh)
@@ -71,11 +72,33 @@ func _ready() -> void:
 static var _bakes: Dictionary = {}
 
 
+## The logs on that place's woodpile: one MultiMesh (one draw), so the baked mesh does not depend on the count.
+func _log_pile() -> void:
+	if not visited or not _has("campfire"):
+		return
+	var logs := mini(int(state.get("woodpile", 0)), 18)
+	if logs <= 0:
+		return
+	var mm := MultiMesh.new()
+	mm.transform_format = MultiMesh.TRANSFORM_3D
+	mm.mesh = Art.log_mesh()
+	mm.instance_count = logs
+	for i in logs:
+		mm.set_instance_transform(i, Transform3D(Basis(Vector3.UP, PI / 2),
+			world.PILE_POS + Vector3(0, 0.185 + (i / 6) * 0.155, ((i % 6) - 2.5) * 0.18)))
+	var mmi := MultiMeshInstance3D.new()
+	mmi.name = "LogPile"
+	mmi.multimesh = mm
+	mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(mmi)
+
+
 func _bake_key() -> String:
 	var b: Array = state.get("built", {}).keys()
 	b.sort()
 	var cr: Dictionary = state.get("crew", {})
-	return "%d|%d|%s|%s|%s|%d|%s|%s" % [k, side, owned, visited, ",".join(b), mini(int(state.get("woodpile", 0)), 18),
+	# (not the woodpile: it changes all the time, so its logs are a MultiMesh of their own, see _log_pile)
+	return "%d|%d|%s|%s|%s|%s|%s" % [k, side, owned, visited, ",".join(b),
 		int(cr.get("lumberjack", 0)) > 0, int(cr.get("waiter", 0)) + int(cr.get("cook", 0)) > 0]
 
 
@@ -104,6 +127,7 @@ func _ground() -> void:
 	add_child(g)
 	if theme.get("water", false):
 		add_child(Plot.lake_node())         # the same lake as world._lake (shared mesh)
+		add_child(Plot.lake_dressing())
 
 
 # ------------------------------------------------------------------ an owned, built plot
@@ -121,13 +145,6 @@ func _camp(r: Node3D) -> void:
 	if _has("campfire"):
 		_cooker(r, world.FIRE_POS[0])
 		Art.box(Vector3(1.3, 0.1, 1.3), Art.plank_mat(), world.PILE_POS + Vector3(0, 0.05, 0), r)
-		var logs := mini(int(state.get("woodpile", 0)), 18)
-		for i in logs:
-			var lg := MeshInstance3D.new()
-			lg.mesh = Art.log_mesh()
-			lg.position = world.PILE_POS + Vector3(0, 0.185 + (i / 6) * 0.155, ((i % 6) - 2.5) * 0.18)
-			lg.rotation.y = PI / 2
-			r.add_child(lg)
 		var rk := Art.rack()
 		rk.position = world.RACK_POS
 		r.add_child(rk)

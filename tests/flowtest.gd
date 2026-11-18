@@ -7,7 +7,7 @@ func ok(c: bool, msg: String) -> void:
 func _initialize() -> void:
 	_run.call_deferred()
 func _ready_scene() -> void:
-	while current_scene == null or current_scene.get("hud") == null or current_scene.get_node_or_null("LoadingScreen") != null:
+	while current_scene == null or current_scene.get("hud") == null or current_scene.get_node_or_null("LoadingScreen") != null or current_scene.get("crossing"):
 		await process_frame
 func _run() -> void:
 	var g = root.get_node("Game")

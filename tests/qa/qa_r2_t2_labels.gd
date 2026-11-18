@@ -93,7 +93,7 @@ func _run() -> void:
 				continue
 			# Plot.west/east, without a static reference to Plot (it needs the Game autoload to compile)
 			var water: bool = g.chapters[k].get("theme", {}).get("water", false)
-			var edge: float = -15.5 if side < 0 else (43.5 if water else 15.5)
+			var edge: float = -15.5 if side < 0 else (31.5 if water else 15.5)        # Plot.LAKE_EAST
 			var worst := ""
 			for d in [9.0, 8.0, 7.0, 6.0, 5.0, 4.0, 3.0, 2.0, 1.2]:
 				w._cross_armed = false

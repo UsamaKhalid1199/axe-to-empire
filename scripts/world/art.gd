@@ -73,6 +73,25 @@ static func _no_shadow_small(n: Node) -> void:
 		_no_shadow_small(c)
 
 
+## Props built from many parts (and merged) are built once per session and packed: later copies are a cheap
+## instantiate that shares the merged meshes (the walk into the next plot rebuilds the whole camp).
+static func _tmpl(key: String, make: Callable) -> Node3D:
+	var ps: PackedScene = _c("tmpl:%s:%s" % [key, merge_enabled], func():
+		var n: Node3D = make.call()
+		_own(n, n)
+		var p := PackedScene.new()
+		p.pack(n)
+		n.free()
+		return p)
+	return ps.instantiate()
+
+
+static func _own(n: Node, root: Node) -> void:
+	for c in n.get_children():
+		c.owner = root
+		_own(c, root)
+
+
 static var merge_enabled := true      # tests can turn static merging off for A/B comparisons
 
 
@@ -147,9 +166,9 @@ static func _merge_collect(n: Node, xf: Transform3D, skip: Array, tools: Diction
 ## Metallic, roughness and normal maps are dropped. Label3Ds and other non-mesh nodes are skipped. Every child
 ## of `root` is freed and replaced by the baked instance (no shadows). Returns the baked instance.
 static func bake_flat(root: Node3D) -> MeshInstance3D:
-	var tools := {}          # texture (or the "" key) -> SurfaceTool
+	var acc := {}            # texture (or the "" key) -> [verts, normals, colours, uvs, indices]
 	var order: Array = []
-	_bake_collect(root, Transform3D.IDENTITY, tools, order)
+	_bake_collect(root, Transform3D.IDENTITY, acc, order)
 	for c in root.get_children():
 		root.remove_child(c)
 		c.free()
@@ -161,7 +180,15 @@ static func bake_flat(root: Node3D) -> MeshInstance3D:
 		return mi
 	var am := ArrayMesh.new()
 	for key in order:
-		tools[key].commit(am)
+		var a: Array = acc[key]
+		var arrs := []
+		arrs.resize(Mesh.ARRAY_MAX)
+		arrs[Mesh.ARRAY_VERTEX] = a[0]
+		arrs[Mesh.ARRAY_NORMAL] = a[1]
+		arrs[Mesh.ARRAY_COLOR] = a[2]
+		arrs[Mesh.ARRAY_TEX_UV] = a[3]
+		arrs[Mesh.ARRAY_INDEX] = a[4]
+		am.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrs)
 		am.surface_set_material(am.get_surface_count() - 1, _flat_mat(key))
 	mi.mesh = am
 	root.add_child(mi)
@@ -184,12 +211,16 @@ static func _flat_mat(key) -> StandardMaterial3D:
 		return m)
 
 
-static func _bake_collect(n: Node, xf: Transform3D, tools: Dictionary, order: Array) -> void:
+## Appends every mesh part under `n` to the per-texture arrays in `acc`, transformed into `root` space. Plain
+## packed-array maths (transform, fill, append): no temporary meshes, no GPU round trips (the old SurfaceTool
+## path made one ArrayMesh per part and read it back: ~0.5 s for a neighbour's camp on the test phone).
+static func _bake_collect(n: Node, xf: Transform3D, acc: Dictionary, order: Array) -> void:
 	for c in n.get_children():
 		if not (c is Node3D) or not c.visible:
 			continue
 		var cx: Transform3D = xf * c.transform
 		if c is MeshInstance3D and c.mesh and c.skin == null:
+			var nxf := Transform3D(cx.basis.orthonormalized(), Vector3.ZERO)
 			for si in c.mesh.get_surface_count():
 				if c.mesh is ArrayMesh and c.mesh.surface_get_primitive_type(si) != Mesh.PRIMITIVE_TRIANGLES:
 					continue
@@ -206,9 +237,26 @@ static func _bake_collect(n: Node, xf: Transform3D, tools: Dictionary, order: Ar
 				var lin := col.srgb_to_linear() / FLAT_RANGE
 				lin.a = 1.0
 				var arr: Array = c.mesh.surface_get_arrays(si)
-				var nv: int = arr[Mesh.ARRAY_VERTEX].size()
-				# the material colour becomes the vertex colour (native fill / multiply; no per-vertex script work
-				# except for the rare vertex-coloured or UV-scaled source)
+				var verts: PackedVector3Array = arr[Mesh.ARRAY_VERTEX]
+				var nv := verts.size()
+				if nv == 0:
+					continue
+				var key = tex if tex else ""
+				if not acc.has(key):
+					acc[key] = [PackedVector3Array(), PackedVector3Array(), PackedColorArray(), PackedVector2Array(), PackedInt32Array()]
+					order.append(key)
+				var a: Array = acc[key]
+				var base: int = a[0].size()
+				a[0].append_array(cx * verts)
+				if arr[Mesh.ARRAY_NORMAL] != null:
+					a[1].append_array(nxf * (arr[Mesh.ARRAY_NORMAL] as PackedVector3Array))
+				else:
+					var up := PackedVector3Array()
+					up.resize(nv)
+					up.fill(cx.basis.y.normalized())
+					a[1].append_array(up)
+				# the material colour becomes the vertex colour (a native fill; per-vertex work only for the rare
+				# vertex-coloured source)
 				var cols := PackedColorArray()
 				if use_vc and arr[Mesh.ARRAY_COLOR] != null:
 					cols = arr[Mesh.ARRAY_COLOR]
@@ -217,36 +265,30 @@ static func _bake_collect(n: Node, xf: Transform3D, tools: Dictionary, order: Ar
 				else:
 					cols.resize(nv)
 					cols.fill(lin)
-				arr[Mesh.ARRAY_COLOR] = cols
+				a[2].append_array(cols)
 				if arr[Mesh.ARRAY_TEX_UV] == null:
 					var z := PackedVector2Array()
 					z.resize(nv)
-					arr[Mesh.ARRAY_TEX_UV] = z
+					a[3].append_array(z)
 				elif uvs != Vector2.ONE:
-					var uv: PackedVector2Array = arr[Mesh.ARRAY_TEX_UV]
-					for i in nv:
-						uv[i] *= uvs
-					arr[Mesh.ARRAY_TEX_UV] = uv
-				if arr[Mesh.ARRAY_NORMAL] == null:
-					var up := PackedVector3Array()
-					up.resize(nv)
-					up.fill(Vector3.UP)
-					arr[Mesh.ARRAY_NORMAL] = up
-				for drop in [Mesh.ARRAY_TANGENT, Mesh.ARRAY_TEX_UV2, Mesh.ARRAY_BONES, Mesh.ARRAY_WEIGHTS,
-						Mesh.ARRAY_CUSTOM0, Mesh.ARRAY_CUSTOM1, Mesh.ARRAY_CUSTOM2, Mesh.ARRAY_CUSTOM3]:
-					arr[drop] = null
+					a[3].append_array(Transform2D(0.0, uvs, 0.0, Vector2.ZERO) * (arr[Mesh.ARRAY_TEX_UV] as PackedVector2Array))
+				else:
+					a[3].append_array(arr[Mesh.ARRAY_TEX_UV])
 				if arr[Mesh.ARRAY_INDEX] == null:
-					arr[Mesh.ARRAY_INDEX] = PackedInt32Array(range(nv))     # append_from needs every part indexed
-				var tmp := ArrayMesh.new()
-				tmp.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr)
-				var key = tex if tex else ""
-				if not tools.has(key):
-					var st := SurfaceTool.new()
-					st.begin(Mesh.PRIMITIVE_TRIANGLES)
-					tools[key] = st
-					order.append(key)
-				tools[key].append_from(tmp, 0, cx)
-		_bake_collect(c, cx, tools, order)
+					a[4].append_array(PackedInt32Array(range(base, base + nv)))
+				else:
+					var ind: PackedInt32Array = arr[Mesh.ARRAY_INDEX]
+					if cx.basis.determinant() < 0.0:
+						ind = ind.duplicate()
+						ind.reverse()          # mirrored part: keep the triangles facing out
+					if base == 0:
+						a[4].append_array(ind)
+					else:
+						var ii := ind.duplicate()
+						for j in ii.size():
+							ii[j] += base
+						a[4].append_array(ii)
+		_bake_collect(c, cx, acc, order)
 
 
 # ------------------------------------------------------------------ meshes
@@ -548,6 +590,10 @@ static func dish(product := "") -> Node3D:
 ## Cooking station for a chapter (the firepit chapter uses Poly Haven models in world.gd).
 ## Returns the node; meta "flame_y" = height the flames sit at.
 static func cooker(kind: String) -> Node3D:
+	return _tmpl("cooker:" + kind, _make_cooker.bind(kind))
+
+
+static func _make_cooker(kind: String) -> Node3D:
 	var n := Node3D.new()
 	var black := paint(Color(0.07, 0.07, 0.075), 0.55, 0.4)
 	var steel := paint(Color(0.72, 0.73, 0.75), 0.25, 0.9)
@@ -699,6 +745,10 @@ static func double_axe() -> Node3D:
 
 
 static func harvester() -> Node3D:
+	return _tmpl("harvester", _make_harvester)
+
+
+static func _make_harvester() -> Node3D:
 	var n := Node3D.new()
 	var green := paint(Color(0.16, 0.36, 0.14), 0.35, 0.25)
 	var yellow := paint(Color(0.96, 0.7, 0.1), 0.38, 0.2)
@@ -757,6 +807,10 @@ static func harvester() -> Node3D:
 
 
 static func truck() -> Node3D:
+	return _tmpl("truck", _make_truck)
+
+
+static func _make_truck() -> Node3D:
 	var n := Node3D.new()
 	var red := paint(Color(0.62, 0.12, 0.08), 0.35, 0.3)
 	var dark := paint(Color(0.08, 0.08, 0.09), 0.8)
@@ -782,6 +836,10 @@ static func plank_mat() -> Material:
 
 
 static func counter() -> Node3D:
+	return _tmpl("counter", _make_counter)
+
+
+static func _make_counter() -> Node3D:
 	var n := Node3D.new()
 	box(Vector3(2.6, 0.95, 0.7), plank_mat(), Vector3(0, 0.475, 0), n)
 	box(Vector3(2.8, 0.08, 0.85), pbr("wood_planks_grey", 0.6, Color(0.7, 0.5, 0.33)), Vector3(0, 0.99, 0), n)
@@ -790,6 +848,10 @@ static func counter() -> Node3D:
 
 
 static func rack() -> Node3D:
+	return _tmpl("rack", _make_rack)
+
+
+static func _make_rack() -> Node3D:
 	var n := Node3D.new()
 	var m := plank_mat()
 	for y in [0.35, 0.8]:
@@ -804,6 +866,10 @@ static func rack() -> Node3D:
 ## `near_fade`: the roof dithers out within ~10 m of the camera (like world._near_fade), for a cabin that stands
 ## between the camera and where the player works.
 static func cabin(w: float, d: float, wall: Color, near_fade := false) -> Node3D:
+	return _tmpl("cabin:%s:%s:%s:%s" % [w, d, wall, near_fade], _make_cabin.bind(w, d, wall, near_fade))
+
+
+static func _make_cabin(w: float, d: float, wall: Color, near_fade: bool) -> Node3D:
 	var n := Node3D.new()
 	var m := pbr("wood_planks_grey", 1.0, wall)
 	box(Vector3(w, 1.9, d), m, Vector3(0, 0.95, 0), n)
@@ -835,6 +901,10 @@ static func cabin(w: float, d: float, wall: Color, near_fade := false) -> Node3D
 
 
 static func arch(text: String) -> Node3D:
+	return _tmpl("arch:" + text, _make_arch.bind(text))
+
+
+static func _make_arch(text: String) -> Node3D:
 	var n := Node3D.new()
 	var m := pbr("bark_brown_02", 1.0)
 	for x in [-1.9, 1.9]:

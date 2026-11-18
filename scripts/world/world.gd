@@ -16,6 +16,10 @@ const FIRE_POS := [Vector3(-0.3, 0, -1.8), Vector3(1.9, 0, -1.8)]
 const RACK_POS := Vector3(0.8, 0, 0.35)
 const COUNTER_POS := Vector3(0.8, 0, 3.3)
 const COIN_POS := Vector3(2.95, 0, 2.55)
+const COOKER_FOOT := {               # kind -> [width x, depth z, x offset]: the cooker's footprint on the ground
+	"firepit": [1.2, 1.2, 0.0], "grill": [1.1, 0.75, 0.0], "fryer": [1.1, 0.75, 0.0], "oven": [1.5, 1.45, 0.0],
+	"smoker": [1.8, 0.75, 0.22]}
+const COOKER_LANE := 1.0              # a gap narrower than this between the two cookers is walled off
 const TRUCK_POS := Vector3(-8.2, 0, 3.6)
 const SELL_POS := Vector3(-6.1, 0, 2.6)
 const SHOP_POS := Vector3(6.3, 0, -2.6)
@@ -112,9 +116,14 @@ var staged := false
 var build_ms: Dictionary = {}       # step -> ms of the last unstaged build (walking into the next plot)
 
 
+## Walking: built behind the old place while the screen fades; main.gd retints the shared foliage at the swap.
+var quiet := false
+
+
 func _ready() -> void:
 	theme = Game.chapter().theme
-	Art.retint_foliage(theme)
+	if not quiet:
+		Art.retint_foliage(theme)
 	if staged:
 		process_mode = Node.PROCESS_MODE_DISABLED
 		return
@@ -134,6 +143,7 @@ func build_steps() -> Array:
 		["Raising the camp", _static_camp],
 		["Walking the road", _neighbours],
 		["Waking the crew", _finish_build],
+		["Opening up", _open_up],
 	]
 
 
@@ -141,7 +151,6 @@ var _pad_warn_ms := -100000
 
 
 func _finish_build() -> void:
-	process_mode = Node.PROCESS_MODE_INHERIT
 	apply_quality()
 	player = Player.new()
 	player.world = self
@@ -178,6 +187,11 @@ func _finish_build() -> void:
 	_make_arrow()
 	specials = Specials.new().setup(self)
 	add_child(specials)
+
+
+## Last build step: the buildings, the crew, and the place starts running.
+func _open_up() -> void:
+	process_mode = Node.PROCESS_MODE_INHERIT
 	_rebuild_all(false)
 	Game.fire_story("start")
 	if Game.task_i == 0 and not Game.seen.has("task_init"):
@@ -229,6 +243,7 @@ func _env() -> void:
 	env.adjustment_saturation = 1.15
 	env.adjustment_contrast = 1.06
 	we.environment = env
+	we.name = "Env"
 	add_child(we)
 	var sun := DirectionalLight3D.new()
 	sun.rotation_degrees = Vector3(float(theme.get("sun_pitch", -52)), -38, 0)
@@ -313,6 +328,7 @@ func _road_ends() -> void:
 func _lake() -> void:
 	# rounded, wavy east end; the shore is worn ground in the ground mask (Plot.lake_sd), not a flat strip
 	add_child(Plot.lake_node())
+	add_child(Plot.lake_dressing())
 	var dock := Art.box(Vector3(5.0, 0.12, 1.4), Art.plank_mat(), Vector3(18.5, 0.25, 4.0), self)
 	dock.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
 	for x in [16.5, 18.5, 20.5]:
@@ -754,7 +770,24 @@ func _chapter_props() -> void:
 # ------------------------------------------------------------------ one road: the plots next door
 
 func _exit_tree() -> void:
-	Plot.finish_jobs()          # never leave a ground-mask job running past this venue (or app exit)
+	if not retired:
+		Plot.finish_jobs()      # never leave a ground-mask job running past this venue (or app exit)
+
+
+## Walking (or MAP) to another place: this one is frozen as a still picture while the screen fades and the next
+## place builds; main.gd frees it a little at a time afterwards. Nothing here may react to the game any more
+## (the active place is already the next one), so every connection to Game from this subtree is cut.
+var retired := false
+
+
+func retire() -> void:
+	retired = true
+	process_mode = Node.PROCESS_MODE_DISABLED       # also takes its bodies and areas out of the physics space
+	for sig in Game.get_signal_list():
+		for c in Game.get_signal_connection_list(sig.name):
+			var o = c.callable.get_object()
+			if o is Node and (o == self or is_ancestor_of(o)):
+				Game.disconnect(sig.name, c.callable)
 
 
 ## Builds (or rebuilds, when a gate opens) the static pictures of the plots west and east of this one.
@@ -991,6 +1024,9 @@ func _spawn_building(id: String, animate: bool) -> void:
 			root.add_child(coin_stack)
 			coin_stack.set_count(_coin_visuals(Game.counter_coins))
 			coin_zone = _zone("coins", "coins", COIN_POS, Vector2(1.6, 1.6), Color("#FFD978"), "")
+			# standing anywhere on the pad (the player's body over its edge, e.g. pressed against the counter's
+			# end) collects: the pad edge alone missed a player who visibly stood on it
+			coin_zone.reach = 0.45
 			var bench := Art.model("wooden_stool_01")
 			bench.position = FIRE_POS[0] + Vector3(-1.1, 0, 0.4)
 			root.add_child(bench)
@@ -1145,7 +1181,16 @@ func _make_fire(i: int, root: Node3D) -> void:
 		ck.position = p
 		root.add_child(ck)
 		flame_y = float(ck.get_meta("flame_y", 0.6))
-	_collider(p + Vector3(0, 0.3, 0), Vector3(1.2, 0.6, 1.2))
+	# the collider matches what you see (the oven and smoker are wider than the old 1.2 m box). Where two
+	# cookers stand closer than a body can pass (oven, smoker) the gap is closed, so nobody walks into a
+	# dead end behind them: the way round is at either end of the row.
+	var fp: Array = COOKER_FOOT.get(kind, COOKER_FOOT.firepit)
+	_collider(p + Vector3(float(fp[2]), 0.3, 0), Vector3(float(fp[0]), 0.6, float(fp[1])))
+	if i == 1:
+		var gap := FIRE_POS[1].x - FIRE_POS[0].x - float(fp[0])
+		if gap < COOKER_LANE:
+			var mid: Vector3 = (FIRE_POS[0] + FIRE_POS[1]) * 0.5
+			_collider(mid + Vector3(float(fp[2]), 0.3, 0), Vector3(gap + 0.2, 0.6, minf(0.8, float(fp[1]))))
 	var flames := CPUParticles3D.new()
 	var qm := QuadMesh.new()
 	qm.size = Vector2(0.45, 0.45)
@@ -1732,7 +1777,19 @@ func spawn_interval() -> float:
 	var rate_mult := lerpf(1.35, 0.85, clampf((Game.rating() - 3.0) / 2.0, 0.0, 1.0))
 	if bd_active:
 		return float(bd.get("interval", 1.0)) / Game.sign_demand()
-	return float(c.interval) / demand * rate_mult * (specials.spawn_mult() if specials else 1.0)
+	var interval: float = float(c.interval) / demand * rate_mult
+	# Demand grows faster than the kitchen (+14% guests vs -5% cook time a kitchen level, +10% a menu level), so in
+	# later places guests came 2-3x faster than the cookers can feed them: the line was always full and every
+	# extra guest only walked past as a lost sale (163 lost vs 670 served in 23 min on the phone; 3 passers always
+	# on screen). Arrivals are capped at ARRIVAL_HEADROOM x what the cookers can serve: the line still fills when
+	# you fall behind, but the overflow is no longer most of the crowd. Income is unchanged (it is kitchen-bound).
+	var per_guest := (float(c.order_min) + float(c.order_max)) * 0.5 + float(c.get("order_bonus", 0))
+	var dishes_s := float(maxi(1, fires.size())) / maxf(0.2, Game.cook_time())
+	# specials (a bell rush) still multiply on top of the cap, so they keep their flood of guests
+	return maxf(interval, per_guest / dishes_s / ARRIVAL_HEADROOM) * (specials.spawn_mult() if specials else 1.0)
+
+
+const ARRIVAL_HEADROOM := 1.25
 
 
 ## A second fire and kitchen upgrades let a longer line form at the counter.

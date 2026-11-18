@@ -130,7 +130,7 @@ func _edges() -> void:
 		_setup(k)
 		await _load()
 		var we := -15.5
-		var ee: float = 43.5 if g.chapters[k].get("theme", {}).get("water", false) else 15.5
+		var ee: float = 31.5 if g.chapters[k].get("theme", {}).get("water", false) else 15.5
 		if k + 1 < g.chapters.size():
 			_stand(we + 1.0)
 			await create_timer(0.6).timeout

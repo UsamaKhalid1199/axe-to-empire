@@ -49,21 +49,45 @@ static func _strip_root_xz(a: Animation) -> void:
 			a.track_set_key_value(t, k, Vector3(first.x, v.y, first.z))
 
 
+## The imported rig with its 8 part meshes already removed and the animation library attached, packed once:
+## every crew member and guest instantiates this instead of the full import (then freeing 8 meshes each).
+static var _stripped: PackedScene
+
+
+## Set owners so pack() keeps the children (local copy: this script must not depend on art.gd / the Game autoload).
+static func _own(n: Node, root: Node) -> void:
+	for c in n.get_children():
+		c.owner = root
+		_own(c, root)
+
+
+static func _stripped_scene() -> PackedScene:
+	if _stripped == null:
+		var inst: Node3D = _scene.instantiate()
+		var sk := inst.get_node("Skeleton3D")
+		for c in sk.get_children():
+			if c is MeshInstance3D:
+				c.free()
+		(inst.get_node("AnimationPlayer") as AnimationPlayer).add_animation_library("a", library())
+		_own(inst, inst)
+		_stripped = PackedScene.new()
+		_stripped.pack(inst)
+		inst.free()
+	return _stripped
+
+
 func _ready() -> void:
 	if _scene == null:
 		_scene = load(BASE + "pete_idle_skin.fbx")
-	var inst: Node3D = _scene.instantiate()
+	var inst: Node3D = (_stripped_scene() if use_merged else _scene).instantiate()
 	add_child(inst)
 	skeleton = inst.get_node("Skeleton3D")
 	anim = inst.get_node("AnimationPlayer")
-	anim.add_animation_library("a", library())
 	# one baked skinned mesh instead of 8 (see tests/bake_pete.gd): far fewer skinning passes and draws
 	if not use_merged:
+		anim.add_animation_library("a", library())
 		play("idle")
 		return
-	for c in skeleton.get_children():
-		if c is MeshInstance3D:
-			c.free()
 	body = MeshInstance3D.new()
 	body.name = "Body"
 	skeleton.add_child(body)

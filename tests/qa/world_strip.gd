@@ -205,21 +205,22 @@ func _run() -> void:
 	pp = w.player.global_position
 	ok(absf(pp.x - 11.0) < 0.5, "MAP arrival from the east at x=%.1f" % pp.x)
 
-	# ---------- the lakeshore road: chapter 2 runs on to x=43.5, its east neighbour starts there
-	ok(absf(Plot.east(2) - 43.5) < 0.01 and w.nb_plots.has(1) and absf(w.nb_plots[1].position.x - 59.0) < 0.01,
-		"lake plot runs on along the shore (east edge 43.5, chapter 1 at x=%.1f)" % w.nb_plots[1].position.x)
-	await _place(30.0)
+	# ---------- the lakeshore road: chapter 2 runs on to x=LAKE_EAST (31.5), its east neighbour starts there
+	ok(absf(Plot.east(2) - Plot.LAKE_EAST) < 0.01 and Plot.LAKE_EAST > 20.0 and w.nb_plots.has(1)
+		and absf(w.nb_plots[1].position.x - (Plot.LAKE_EAST + 15.5)) < 0.01,
+		"lake plot runs on along the shore (east edge %.1f, chapter 1 at x=%.1f)" % [Plot.LAKE_EAST, w.nb_plots[1].position.x])
+	await _place(Plot.LAKE_EAST - 13.5)
 	moved = await _walk(1.0, 6.0)
 	w = current_scene.world
 	ok(moved and g.venue == 1, "walked the lakeshore road east into chapter 1")
 	pp = w.player.global_position
 	ok(pp.x < -13.0, "arrived at chapter 1's west edge (x=%.2f)" % pp.x)
-	ok(w.nb_plots[-1].k == 2 and absf(w.nb_plots[-1].position.x + 59.0) < 0.01, "lake plot drawn west of chapter 1 at x=-59")
+	ok(w.nb_plots[-1].k == 2 and absf(w.nb_plots[-1].position.x + Plot.LAKE_EAST + 15.5) < 0.01, "lake plot drawn west of chapter 1 at x=%.1f" % w.nb_plots[-1].position.x)
 	await _place(-12.0)
 	moved = await _walk(-1.0, 4.0)
 	w = current_scene.world
 	pp = w.player.global_position
-	ok(moved and g.venue == 2 and pp.x > 42.0 and pp.x < 43.4, "walked west into the lake plot, arriving at its road end (x=%.2f)" % pp.x)
+	ok(moved and g.venue == 2 and pp.x > Plot.LAKE_EAST - 1.5 and pp.x < Plot.LAKE_EAST - 0.1, "walked west into the lake plot, arriving at its road end (x=%.2f)" % pp.x)
 
 	Plot.finish_jobs()
 	print("WORLD_STRIP fails=%d" % fails)

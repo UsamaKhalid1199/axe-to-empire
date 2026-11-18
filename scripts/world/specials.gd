@@ -29,6 +29,7 @@ var _car_t := 4.0
 # raft
 const RAFT_DOCK := Vector3(14.3, 0, 1.8)
 const RAFT_POS := Vector3(17.9, 0.08, 1.8)
+const RAFT_OUT := Vector3(26.4, 0.08, -8.0)        # out on the lake, where it drifts out of sight
 const RAFT_CAP := 16
 const RAFT_AWAY := 20.0
 var raft: Node3D
@@ -433,7 +434,7 @@ func _raft_depart() -> void:
 	Game.sp["away"] = RAFT_AWAY
 	Game.sp["raft"] = 0
 	var tw := raft.create_tween()
-	tw.tween_property(raft, "position", RAFT_POS + Vector3(14, 0, -6), 2.5).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN)
+	tw.tween_property(raft, "position", RAFT_OUT, 2.5).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN)
 	tw.tween_callback(func():
 		raft.visible = false
 		raft_stack.set_count(0))
@@ -447,7 +448,7 @@ func _raft_return() -> void:
 	Game.sp["paid"] = 0
 	_idle_t = 0.0
 	raft_stack.set_count(0)
-	raft.position = RAFT_POS + Vector3(14, 0, -6)
+	raft.position = RAFT_OUT
 	raft.visible = true
 	var tw := raft.create_tween()
 	tw.tween_property(raft, "position", RAFT_POS, 2.5).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)

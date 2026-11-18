@@ -79,16 +79,12 @@ func _ready() -> void:
 	Game.offline_ready.connect(func():
 		if modal_kind == "":
 			open_modal("offline"))
-	world.big_day_finished.connect(func(won, served, goal):
-		_bd_result = [won, served, goal]
-		open_modal("bigday_result"))
 	Game.coins_changed.connect(func(_v): _on_coins_for_modal())
 	Game.rating_changed.connect(func(_v): _refresh_top())
 	Game.state_changed.connect(_refresh_modal_soft)
 	Game.jobs_changed.connect(_refresh_jobs_badge)
 	Game.toast.connect(show_toast)
-	world.zone_entered.connect(_on_zone_entered)
-	world.zone_exited.connect(_on_zone_exited)
+	_bind_world()
 	_coin_shown = Game.coins
 	if OS.is_debug_build():
 		fps_label = UI.label("", 18, Color(1, 1, 1, 0.7))
@@ -101,6 +97,40 @@ func _ready() -> void:
 		open_modal.call_deferred("offline")
 	elif Game.chapter_done:
 		pass
+
+
+func _bind_world() -> void:
+	world.big_day_finished.connect(_on_big_day_finished)
+	world.zone_entered.connect(_on_zone_entered)
+	world.zone_exited.connect(_on_zone_exited)
+
+
+func _on_big_day_finished(won: bool, served: int, goal: int) -> void:
+	_bd_result = [won, served, goal]
+	open_modal("bigday_result")
+
+
+## Walking (or MAP) swaps the world under the HUD instead of rebuilding the HUD: point everything at the new
+## place. A finger still on the joystick keeps walking the new player.
+func rebind(w: Node) -> void:
+	if world and is_instance_valid(world):
+		for pair in [[world.big_day_finished, _on_big_day_finished], [world.zone_entered, _on_zone_entered],
+				[world.zone_exited, _on_zone_exited]]:
+			if pair[0].is_connected(pair[1]):
+				pair[0].disconnect(pair[1])
+	world = w
+	_bind_world()
+	if modal != null and modal_kind in ["shop", "crew", "gate", "upgrades", "bigday_result"]:
+		close_modal()                   # (zone menus belong to the place you left)
+	_till_dirty = true
+	_ov_t = 0.0
+	_refresh_top()
+	_refresh_task()
+	_refresh_jobs_badge()
+	if joy.active:
+		joy._emit()
+	else:
+		world.player.input_dir = Vector2.ZERO
 
 
 func _side_button_at(p: Vector2) -> UIShape:
