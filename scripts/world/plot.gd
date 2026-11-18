@@ -66,6 +66,7 @@ static func _make_mask(k: int, bare: bool, patches: Array) -> Image:
 	data.resize(res * res)
 	var segs := [[Vector2(-1, 2), Vector2(-7, 3.4), 1.3, 1.0], [Vector2(-0.5, -2), Vector2(-1.5, -12), 1.1, 0.8],
 		[Vector2(1.5, 1), Vector2(6.3, 3.4), 1.0, 1.0]]
+	var water := east(k) > PLOT_HALF + 1.0
 	for y in res:
 		var wz := -40.0 + (y + 0.5) * sz
 		var road := 1.0 - absf(wz - ROAD_Z) / 1.8
@@ -86,6 +87,9 @@ static func _make_mask(k: int, bare: bool, patches: Array) -> Image:
 					var p := Vector2(wx, wz)
 					var t := clampf((p - a).dot(ab) / ab.length_squared(), 0.0, 1.0)
 					v = maxf(v, (1.0 - (p - (a + ab * t)).length() / float(s[2])) * float(s[3]))
+			if water and wx > 14.0 and wz < 11.5:
+				# a worn sandy shore all round the lake, a little under the water's edge too
+				v = maxf(v, 1.0 - absf(lake_sd(wx, wz) + 0.3) / 1.4)
 			for pt in patches:
 				var px := (wx - float(pt[0])) / float(pt[2])
 				if absf(px) >= 1.0:
@@ -207,3 +211,72 @@ static func ground_plane(x0: float, x1: float, mat: Material) -> MeshInstance3D:
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	mi.position = Vector3((x0 + x1) * 0.5, 0, 0)
 	return mi
+
+
+# ------------------------------------------------------------------ the lake (Lakeside Diner)
+
+## The lake north of the lakeshore road, in the Lakeside plot's coordinates: a rectangle with a straight west
+## shore (the dock and the raft) and wide, slightly wavy rounded corners in the east, where the lakeshore road
+## ends. Signed distance in metres (< 0 = water), shared by the water mesh and the shore in the ground mask.
+const LAKE_MIN := Vector2(16.5, -34.0)
+const LAKE_MAX := Vector2(42.5, 9.3)
+
+
+static func lake_sd(x: float, z: float) -> float:
+	var c := (LAKE_MIN + LAKE_MAX) * 0.5
+	var half := (LAKE_MAX - LAKE_MIN) * 0.5
+	var r := 9.0 if x > c.x else 1.0
+	var q := Vector2(absf(x - c.x), absf(z - c.y)) - half + Vector2(r, r)
+	var d := Vector2(maxf(q.x, 0.0), maxf(q.y, 0.0)).length() + minf(maxf(q.x, q.y), 0.0) - r
+	# gentle waves along the south and east shores (none by the dock)
+	return d + 0.35 * sin(x * 0.55 + 1.3) * sin(z * 0.45 + 0.4) * smoothstep(20.0, 26.0, x)
+
+
+## The water surface: a fan from the middle out to where lake_sd = 0 (cached; one draw).
+static func lake_mesh() -> ArrayMesh:
+	return Art._c("lake_mesh", func():
+		var c := (LAKE_MIN + LAKE_MAX) * 0.5
+		var n := 96
+		var rim := PackedVector3Array()
+		for i in n:
+			var a := TAU * i / n
+			var dir := Vector2(cos(a), sin(a))
+			var lo := 0.0
+			var hi := 40.0
+			for it in 22:
+				var mid := (lo + hi) * 0.5
+				var p := c + dir * mid
+				if lake_sd(p.x, p.y) < 0.0:
+					lo = mid
+				else:
+					hi = mid
+			var e := c + dir * lo
+			rim.append(Vector3(e.x, 0.0, e.y))
+		var st := SurfaceTool.new()
+		st.begin(Mesh.PRIMITIVE_TRIANGLES)
+		st.set_normal(Vector3.UP)
+		var mid3 := Vector3(c.x, 0.0, c.y)
+		for i in n:
+			var a := rim[i]
+			var b := rim[(i + 1) % n]
+			for v in [mid3, b, a]:
+				st.set_uv(Vector2(v.x, v.z) * 0.05)
+				st.add_vertex(v)
+		var am := st.commit()
+		var m := StandardMaterial3D.new()
+		m.albedo_color = Color(0.12, 0.32, 0.42)
+		m.roughness = 0.08
+		m.metallic = 0.35
+		m.metallic_specular = 0.8
+		m.cull_mode = BaseMaterial3D.CULL_DISABLED      # (winding-proof: it is only ever seen from above)
+		am.surface_set_material(0, m)
+		return am)
+
+
+static func lake_node() -> MeshInstance3D:
+	var w := MeshInstance3D.new()
+	w.name = "Water"
+	w.mesh = lake_mesh()
+	w.position.y = 0.04
+	w.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	return w

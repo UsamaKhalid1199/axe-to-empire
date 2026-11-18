@@ -13,6 +13,10 @@ signal tills_changed                 # cash waiting at other places changed
 
 const SAVE_PATH := "user://save_v2.json"
 const BACKUP_PATH := "user://save_v2.bak"
+## Recovery copy: only ever replaced by a save with MORE progress, so a reset, a bad build or a corrupt
+## write can never wipe the best progress. Used when the main save and its backup are both unreadable.
+const KEEP_PATH := "user://save_v2.keep"
+var _keep_score := -1.0
 
 var cfg: Dictionary = {}           # active chapter's config (base config scaled + themed)
 var base_cfg: Dictionary = {}
@@ -290,8 +294,9 @@ func _rescale_jobs(m_old: float, m_new: float) -> void:
 		j.reward = maxi(10, int(round(float(j.reward) * f / 10.0)) * 10)
 		if j.id == "earn" and not j.claimed:
 			var old_goal := int(j.goal)
+			var frac := float(j.prog) / maxf(1.0, float(old_goal))      # keep how far along you are, not the raw number
 			j.goal = maxi(1, int(round(float(j.goal) * f)))
-			j.prog = mini(int(j.prog), int(j.goal))
+			j.prog = mini(int(round(frac * float(j.goal))), int(j.goal))
 			j.text = String(j.text).replace(str(old_goal), str(j.goal))
 	jobs_changed.emit()
 
@@ -371,6 +376,8 @@ func _refresh_rates() -> void:
 ## you can't park forever. Nothing piles up while the app is closed.
 const TILL_CAP_MIN := 20.0
 var _till_acc: Dictionary = {}          # k -> fractional coins
+var _till_emit_t := 0.0
+var _till_pending := false
 
 
 func _empire_tick(delta: float) -> void:
@@ -397,7 +404,11 @@ func _empire_tick(delta: float) -> void:
 			vd["counter_coins"] = have + n
 			changed = true
 		_till_acc[k] = acc
-	if changed:
+	_till_emit_t -= delta
+	_till_pending = _till_pending or changed
+	if _till_pending and _till_emit_t <= 0.0:
+		_till_emit_t = 0.25          # a few updates a second is plenty for labels and the chip
+		_till_pending = false
 		tills_changed.emit()
 
 
@@ -463,7 +474,7 @@ func add_coins(n: int, count_as_earned := true) -> void:
 
 
 func spend(n: int) -> bool:
-	if n > coins:
+	if n < 0 or n > coins:
 		return false
 	coins -= n
 	coins_changed.emit(coins)
@@ -1108,7 +1119,8 @@ func _venues_for_save() -> Array:
 func save_game() -> void:
 	if not saving_enabled:
 		return
-	var txt := JSON.stringify(to_dict())
+	var dd := to_dict()
+	var txt := JSON.stringify(dd)
 	var tmp := SAVE_PATH + ".tmp"
 	var f := FileAccess.open(tmp, FileAccess.WRITE)
 	if f == null:
@@ -1120,6 +1132,19 @@ func save_game() -> void:
 		dir.copy(SAVE_PATH, BACKUP_PATH)
 	dir.rename(tmp, SAVE_PATH)
 	last_save_unix = int(Time.get_unix_time_from_system())
+	if _keep_score < 0.0:
+		_keep_score = _progress_score(_read(KEEP_PATH))
+	var sc := _progress_score(dd)
+	if sc >= _keep_score:
+		dir.copy(SAVE_PATH, KEEP_PATH)
+		_keep_score = sc
+
+
+## How far a save has got: prestige first, then lifetime cash earned, then unlocked places.
+func _progress_score(d: Dictionary) -> float:
+	if d.is_empty():
+		return 0.0
+	return float(d.get("prestige", 0)) * 1e15 + float(d.get("stats", {}).get("earned", 0)) + float(d.get("unlocked", 1))
 
 
 func _read(path: String) -> Dictionary:
@@ -1133,6 +1158,8 @@ func load_game() -> void:
 	var d := _read(SAVE_PATH)
 	if d.is_empty():
 		d = _read(BACKUP_PATH)
+	if d.is_empty():
+		d = _read(KEEP_PATH)
 	if d.is_empty():
 		return
 	coins = int(d.coins)
@@ -1206,6 +1233,8 @@ func load_game() -> void:
 	for key in STATIONS:
 		levels[key] = clampi(int(levels[key]), 0, station_max() - 1)
 	offline_reward = int(d.get("offline_reward", 0))
+	if int(d.get("save_ver", 0)) < 3:
+		offline_reward = 0            # one world: the old away-earnings pile isn't paid out any more
 	_cc_cache.clear()
 	# gates used to charge their savings goal; give that money back once to saves from before the fix
 	if not d.get("gate_refund", false) and unlocked > 1:
@@ -1265,3 +1294,4 @@ func reset_all() -> void:
 	levels = {"tool": 0, "bag": 0, "boots": 0, "fire": 0, "menu": 0, "dining": 0, "sign": 0, "station": 0}
 	pro = {"tool": 0, "bag": 0, "boots": 0}
 	jobs_day = ""; refresh_jobs()
+	save_game()        # write the fresh game now, so a relaunch doesn't fall back to the recovery copy

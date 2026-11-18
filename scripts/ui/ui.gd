@@ -60,6 +60,41 @@ static func fit(l: Label, max_w: float, size: int, min_size: int) -> void:
 	l.size = Vector2.ZERO
 
 
+## After fit(): a wrapped label gets the narrowest width that keeps the same number of lines, so the lines
+## come out even and the last one is never a lone word.
+static func balance(l: Label) -> void:
+	if l.autowrap_mode == TextServer.AUTOWRAP_OFF or l.custom_minimum_size.x <= 0.0:
+		return
+	var f: Font = l.get_theme_font("font")
+	var fs: int = l.get_theme_font_size("font_size")
+	var max_w := l.custom_minimum_size.x
+	var n := _wrap_lines(l.text, f, fs, max_w)
+	var lo := max_w * 0.4
+	var hi := max_w
+	for i in 12:
+		var mid := (lo + hi) * 0.5
+		if _wrap_lines(l.text, f, fs, mid) <= n:
+			hi = mid
+		else:
+			lo = mid
+	l.custom_minimum_size.x = minf(max_w, ceilf(hi) + 4.0)
+	l.size = Vector2.ZERO
+
+
+## Greedy word wrap: how many lines `text` takes at width `w`.
+static func _wrap_lines(text: String, f: Font, fs: int, w: float) -> int:
+	var lines := 1
+	var cur := ""
+	for word in text.split(" ", false):
+		var t := word if cur == "" else cur + " " + word
+		if cur != "" and f.get_string_size(t, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x > w:
+			lines += 1
+			cur = word
+		else:
+			cur = t
+	return lines
+
+
 static func label(text: String, size := 24, color := TEXT, font: Font = null, align := HORIZONTAL_ALIGNMENT_LEFT) -> Label:
 	var l := Label.new()
 	l.text = text

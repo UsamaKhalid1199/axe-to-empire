@@ -73,8 +73,13 @@ func _build_venue(ls: LoadingScreen, from: float, arrive := {}) -> void:
 	move_child(ls, -1)
 	world.float_text.connect(_float_text)
 	world.cross_requested.connect(walk_to)
-	# let shaders compile behind the loader
+	# let shaders compile behind the loader: first a look at each road edge (the plots next door use materials
+	# nothing in the camp does; the first walk there used to hitch for ~0.4 s on the phone), then back home
 	ls.set_status("Almost there…", 0.96)
+	for aim in world.prewarm_aims():
+		world.cam_look(aim)
+		await _frames(2)
+	world.cam_look(world.cam_aim(world.player.global_position))
 	await _frames(6)
 	ls.finish()
 
@@ -82,8 +87,15 @@ func _build_venue(ls: LoadingScreen, from: float, arrive := {}) -> void:
 ## MAP / gate travel: full rebuild behind the loading screen; you arrive on the road at the side you came from.
 func travel_to(k: int) -> void:
 	var from := Game.venue
+	var take := {}
+	if world and is_instance_valid(world) and from != k:
+		take = world.carried()             # bag logs and dishes come along, as when walking
+		world.before_leave()
 	if Game.travel(k):
-		reload_venue(WorldScript.map_arrival(from, k))
+		var arrive := WorldScript.map_arrival(from, k)
+		if not arrive.is_empty():
+			arrive.merge(take)
+		reload_venue(arrive)
 
 
 ## Walking along the road into the plot next door: a quick fade instead of the loading screen.
@@ -111,6 +123,8 @@ func walk_to(k: int, arrive: Dictionary) -> void:
 	tw.set_ignore_time_scale(true)
 	tw.tween_property(black, "color:a", 1.0, 0.14)
 	await tw.finished
+	if world and is_instance_valid(world):
+		world.before_leave()
 	if not Game.travel(k):
 		layer.queue_free()
 		crossing = false

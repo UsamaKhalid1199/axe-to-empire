@@ -77,6 +77,12 @@ func _draw() -> void:
 	draw_rect(Rect2(Vector2(-PAD, -PAD), size + Vector2(PAD, PAD) * 2.0), Color.WHITE)
 
 
+func _notification(what: int) -> void:
+	# a plain panel (row background, swatch frame) inside a scroll list must let drags through to the list
+	if what == NOTIFICATION_ENTER_TREE and not clickable and mouse_filter == Control.MOUSE_FILTER_STOP and _scroll_parent() != null:
+		mouse_filter = Control.MOUSE_FILTER_PASS
+
+
 func make_clickable() -> UIShape:
 	clickable = true
 	return self
@@ -87,10 +93,52 @@ var _down := false
 
 
 var _touch_idx := -1
+var _scroller: ScrollContainer = null      # set once a press turned into a drag: the list we scroll instead
+
+const DRAG_CANCEL := 12.0                  # px a finger may move on a button inside a list before it scrolls instead
+
+
+func _scroll_parent() -> ScrollContainer:
+	var p := get_parent()
+	while p:
+		if p is ScrollContainer:
+			return p
+		p = p.get_parent()
+	return null
+
+
+## A press that moved too far inside a scroll list: drop the press (no click on release) and scroll the list.
+func _drag_check(pos: Vector2, rel: Vector2) -> void:
+	if _scroller:
+		if is_instance_valid(_scroller):
+			_scroller.scroll_vertical -= int(round(rel.y))
+			_scroller.scroll_horizontal -= int(round(rel.x))
+		return
+	if not _down or pos.distance_to(_press_pos) <= DRAG_CANCEL:
+		return
+	var sc := _scroll_parent()
+	if sc == null:
+		return                              # not in a list: a finger rolling off a little still clicks
+	_down = false
+	_scroller = sc
+	create_tween().tween_property(self, "scale", Vector2.ONE, 0.12)
+	var d := pos - _press_pos               # catch up with the part of the drag before the threshold
+	sc.scroll_vertical -= int(round(d.y))
+	sc.scroll_horizontal -= int(round(d.x))
 
 
 func _gui_input(e: InputEvent) -> void:
 	if not clickable:
+		return
+	if e is InputEventMouseMotion and (_down or _scroller) and _touch_idx == -1:
+		_drag_check(e.position, e.relative)
+		accept_event()
+		return
+	if e is InputEventScreenDrag and e.index >= 1 and e.index == _touch_idx:
+		if _down and e.position.distance_to(_press_pos) > DRAG_CANCEL and _scroll_parent() != null:
+			_down = false
+			create_tween().tween_property(self, "scale", Vector2.ONE, 0.12)
+		accept_event()
 		return
 	# extra fingers (index >= 1) get no emulated mouse events, so handle them here
 	# (e.g. tapping a button with one thumb while the other still holds the joystick)
@@ -101,6 +149,8 @@ func _gui_input(e: InputEvent) -> void:
 			_press_pos = e.position
 			var tw0 := create_tween()
 			tw0.tween_property(self, "scale", Vector2(0.94, 0.94), 0.06)
+		elif e.index == _touch_idx and not _down:
+			_touch_idx = -1                 # the press became a drag: no click
 		elif _down and e.index == _touch_idx:
 			_touch_idx = -1
 			_down = false
@@ -119,9 +169,12 @@ func _gui_input(e: InputEvent) -> void:
 	if e is InputEventMouseButton and e.button_index == MOUSE_BUTTON_LEFT:
 		if e.pressed:
 			_down = true
+			_scroller = null
 			_press_pos = e.position
 			var tw := create_tween()
 			tw.tween_property(self, "scale", Vector2(0.94, 0.94), 0.06)
+		elif _scroller:
+			_scroller = null        # the press became a scroll: no click
 		elif _down:
 			_down = false
 			accept_event()          # before emitting: a handler may free this button (modal rebuild/close)

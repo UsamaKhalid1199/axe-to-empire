@@ -17,6 +17,7 @@ var _label: Label3D
 
 # drive-thru
 const KIOSK := Vector3(10.2, 0, 9.3)
+const SIGN_ON_ROOF := Vector3(0, 2.75, 0.45)     # the DRIVE-THRU sign, relative to KIOSK
 const CAR_Z := 12.9
 const CAR_STOP_X := 10.2
 const CAR_GAP := 3.4
@@ -116,16 +117,15 @@ func _build_drive() -> void:
 		aw.rotation.x = 0.35
 	Art.box(Vector3(1.5, 0.75, 0.06), Art.paint(Color(0.15, 0.2, 0.24), 0.1, 0.4), KIOSK + Vector3(0, 1.45, 0.81), root)
 	Art.box(Vector3(1.8, 0.08, 0.5), Art.plank_mat(), KIOSK + Vector3(0, 1.0, 0.98), root)
-	var post := Art.cylinder(0.08, 3.4, Art.paint(Color(0.2, 0.2, 0.22), 0.4, 0.6), KIOSK + Vector3(1.9, 1.7, 1.4), root, 8)
-	post.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
-	Art.box(Vector3(1.6, 0.8, 0.12), Art.paint(Color(0.95, 0.75, 0.2), 0.4), KIOSK + Vector3(1.9, 3.2, 1.4), root)
+	# the sign sits on the roof: on a post east of the kiosk it covered the venue's road sign
+	Art.box(Vector3(1.6, 0.8, 0.12), Art.paint(Color(0.95, 0.75, 0.2), 0.4), KIOSK + SIGN_ON_ROOF, root)
 	var s := Label3D.new()
 	s.text = "DRIVE-THRU"
 	s.font = UI.font_bold()
 	s.font_size = 56
 	s.pixel_size = 0.005
 	s.modulate = Color(0.3, 0.08, 0.04)
-	s.position = KIOSK + Vector3(1.9, 3.2, 1.47)
+	s.position = KIOSK + SIGN_ON_ROOF + Vector3(0, 0, 0.07)
 	root.add_child(s)
 	world._collider(KIOSK + Vector3(0, 1, 0), Vector3(2.6, 2, 1.6))
 	kiosk_stack = Stack.new().setup("dish", Stack.Layout.COUNTER, DRIVE_CAP)
@@ -335,7 +335,8 @@ func _tick_drive(delta: float) -> void:
 				if c.x <= tx + 0.01 and slot == 0:
 					c.state = "wait"
 			"wait":
-				c.waited += delta
+				if world.modal_kind == "":
+					c.waited += delta      # drive-thru patience holds under a modal too
 				c.t -= delta
 				if c.t <= 0.0 and kiosk_stack.count() > 0:
 					c.t = 0.22
@@ -367,6 +368,16 @@ func _tick_drive(delta: float) -> void:
 			if c.state != "leave":
 				waiting += 1
 		zone.set_text("DRIVE-THRU" if waiting == 0 else "%d CAR%s" % [waiting, "S" if waiting > 1 else ""])
+
+
+## Leaving the place: a car still waiting hands back the dishes it has (it would drive off unpaid).
+func on_leave() -> void:
+	for c in cars:
+		if c.state == "wait" and int(c.got) > 0:
+			Game.sp["kiosk"] = int(Game.sp.get("kiosk", 0)) + int(c.got)
+			c.got = 0
+	if kiosk_stack:
+		kiosk_stack.set_count(int(Game.sp.get("kiosk", 0)))
 
 
 func _spawn_car() -> void:

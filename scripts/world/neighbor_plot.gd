@@ -1,7 +1,7 @@
 class_name NeighborPlot
 extends Node3D
 ## The plot next door on the same road: a cheap, static picture of another chapter's place.
-##   owned + visited   its ground and what is built there (cooker, counter, tables, cabins, station, truck, gate),
+##   owned + visited   its ground and what is built there (cooker, counter, tables, cabins, station, truck),
 ##                     a cash pile on its counter and a label with the cash waiting there (Game.till(k))
 ##   owned, not yet    bare land with a "walk in" sign
 ##   locked            fenced FOR SALE land with the chapter name
@@ -101,21 +101,7 @@ func _ground() -> void:
 	g.name = "Ground"
 	add_child(g)
 	if theme.get("water", false):
-		# the lake beside the lakeshore road (matches world._lake)
-		var w := MeshInstance3D.new()
-		var pm := PlaneMesh.new()
-		pm.size = Vector2(26, 43.3)
-		w.mesh = pm
-		var m := StandardMaterial3D.new()
-		m.albedo_color = Color(0.12, 0.32, 0.42)
-		m.roughness = 0.08
-		m.metallic = 0.35
-		m.metallic_specular = 0.8
-		w.material_override = m
-		w.position = Vector3(29.5, 0.04, -12.35)
-		w.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		w.name = "Water"
-		add_child(w)
+		add_child(Plot.lake_node())         # the same lake as world._lake (shared mesh)
 
 
 # ------------------------------------------------------------------ an owned, built plot
@@ -126,14 +112,10 @@ func _camp(r: Node3D) -> void:
 	truck.position = world.TRUCK_POS
 	truck.rotation.y = -0.25
 	r.add_child(truck)
-	var arch := Art.arch("")
-	arch.position = world.GATE_POS
-	arch.rotation.y = PI / 2
-	r.add_child(arch)
 	_road_sign(r, SIGN_AT)
 	if theme.get("water", false):
 		Art.box(Vector3(5.0, 0.12, 1.4), Art.plank_mat(), Vector3(18.5, 0.25, 4.0), r)
-		Art.box(Vector3(26.2, 0.02, 0.5), Art.paint(Color(0.62, 0.55, 0.42), 0.95), Vector3(29.6, 0.03, 9.45), r)
+	_road_on(r)
 	if _has("campfire"):
 		_cooker(r, world.FIRE_POS[0])
 		Art.box(Vector3(1.3, 0.1, 1.3), Art.plank_mat(), world.PILE_POS + Vector3(0, 0.05, 0), r)
@@ -237,8 +219,7 @@ func _special(r: Node3D, wall: Color) -> void:
 				var col := Color(0.82, 0.14, 0.1) if i % 2 == 0 else Color(0.96, 0.94, 0.9)
 				Art.box(Vector3(0.3, 0.05, 0.7), Art.paint(col, 0.6), p + Vector3(-0.75 + i * 0.3, 1.98, 1.1), r).rotation.x = 0.35
 			Art.box(Vector3(1.5, 0.75, 0.06), Art.paint(Color(0.15, 0.2, 0.24), 0.1), p + Vector3(0, 1.45, 0.81), r)
-			Art.cylinder(0.08, 3.4, Art.paint(Color(0.2, 0.2, 0.22), 0.4), p + Vector3(1.9, 1.7, 1.4), r, 6)
-			Art.box(Vector3(1.6, 0.8, 0.12), Art.paint(Color(0.95, 0.75, 0.2), 0.4), p + Vector3(1.9, 3.2, 1.4), r)
+			Art.box(Vector3(1.6, 0.8, 0.12), Art.paint(Color(0.95, 0.75, 0.2), 0.4), p + Specials.SIGN_ON_ROOF, r)
 		"raft":
 			var bark := Art.pbr("bark_brown_02")
 			for i in 7:
@@ -315,7 +296,7 @@ func _figure(r: Node3D, p: Vector3, yaw: float, shirt: Color) -> void:
 	Art.box(Vector3(0.38, 0.08, 0.38), Art.paint(Color(0.95, 0.75, 0.2), 0.6), Vector3(0, 1.76, 0), n)
 
 
-const SIGN_AT := Vector3(13.4, 0, 10.0)
+const SIGN_AT := Vector3(13.4, 0, 7.6)          # = world._chapter_props
 
 
 func _road_sign(r: Node3D, at: Vector3) -> void:
@@ -340,7 +321,8 @@ func _sign_labels() -> void:
 	else:
 		l.text = ("OPEN" if owned else "FOR SALE") + "\n" + nm
 		l.font_size = 64
-		l.pixel_size = 0.0038
+		l.pixel_size = 0.0052
+		l.line_spacing = -8.0
 		l.position = _board_at() + Vector3(0, 2.0, 0.07)
 		l.name = "BoardLabel"
 	add_child(l)
@@ -357,7 +339,7 @@ func _for_sale(r: Node3D) -> void:
 	var x := near_x + _inward() * 0.45
 	var wood := Art.pbr("bark_brown_02")
 	var rail := Art.plank_mat()
-	for seg in [[-6.5, Plot.ROAD_GAP.x - 0.3], [Plot.ROAD_GAP.y + 0.6, 17.0]]:
+	for seg in [[-6.5, Plot.ROAD_GAP.x - 0.3], [Plot.ROAD_GAP.y + 0.6, 15.6]]:
 		var z0: float = seg[0]
 		var z1: float = seg[1]
 		var n := int(ceil((z1 - z0) / 2.0))
@@ -372,14 +354,39 @@ func _for_sale(r: Node3D) -> void:
 	for z in [Plot.ROAD_GAP.x + 0.1, Plot.ROAD_GAP.y + 0.3]:
 		Art.box(Vector3(0.16, 1.0, 0.16), wood, Vector3(x, 0.5, z), r)
 	_board(r, "FOR SALE", Color(0.75, 0.12, 0.08))
+	_road_on(r, false)
 
 
 func _new_land(r: Node3D) -> void:
 	_board(r, "OPEN", Color(0.2, 0.5, 0.18))
+	_road_on(r)
 
 
+## Beside the road just past the edge, on the north side facing the camera (south of the road it stood under
+## the camera and showed its back), clear of the lake at the Lakeside plot's rounded east end.
 func _board_at() -> Vector3:
-	return Vector3(near_x + _inward() * 2.2, 0, Plot.ROAD_GAP.y + 1.3)
+	return Vector3(near_x + _inward() * 2.1, 0, Plot.ROAD_GAP.x - 1.7)
+
+
+## The road visibly runs on: white edge posts along both sides for a few metres into this plot and, where the
+## player can walk in, two arrows painted on the road at the crossing. Part of the baked mesh (no extra draws).
+func _road_on(r: Node3D, walk_in := true) -> void:
+	var white := Art.paint(Color(0.95, 0.94, 0.9), 0.6)
+	var red := Art.paint(Color(0.85, 0.15, 0.1), 0.5)
+	for i in 4:
+		var x := near_x + _inward() * (1.6 + i * 3.2)
+		for z in [Plot.ROAD_GAP.x + 0.15, Plot.ROAD_GAP.y - 0.75]:
+			Art.box(Vector3(0.14, 0.8, 0.14), white, Vector3(x, 0.4, z), r)
+			Art.box(Vector3(0.15, 0.12, 0.15), red, Vector3(x, 0.68, z), r)
+	if not walk_in:
+		return
+	var paint := Art.paint(Color(0.97, 0.95, 0.86), 0.8)
+	for j in 2:
+		var tip := near_x + _inward() * (1.0 + j * 1.6)
+		for s in [-1.0, 1.0]:
+			# a chevron pointing into this plot: two bars meeting at the tip
+			var bar := Art.box(Vector3(1.0, 0.02, 0.2), paint, Vector3(tip - _inward() * 0.33, 0.025, Plot.ROAD_Z + s * 0.33), r)
+			bar.rotation.y = s * _inward() * PI / 4.0
 
 
 func _board(r: Node3D, _head: String, col: Color) -> void:
@@ -399,14 +406,16 @@ func _labels() -> void:
 	till_label.name = "TillLabel"
 	till_label.font = UI.font_bold()
 	till_label.font_size = 64
-	till_label.pixel_size = 0.0048
+	till_label.pixel_size = LABEL_PX
 	till_label.outline_size = 16
 	till_label.outline_modulate = Color(0.08, 0.05, 0.02, 0.9)
 	till_label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	till_label.line_spacing = -6.0
-	# just past the edge, over the road: the HUD's button column covers the right of the screen, and a
-	# portrait view only shows a few metres beyond the edge either way
-	till_label.position = Vector3(near_x + _inward() * 0.3, 3.4, Plot.ROAD_Z - 1.2)
+	# just past the edge, over the road and above the player's head on screen. A portrait view only shows a few
+	# metres beyond the edge, and the HUD's button column covers the right of the screen, so the label is
+	# centred on the edge (the camera leans toward the edge there, see world.cam_aim). The venues' road signs
+	# stand further north (SIGN_AT), clear of it.
+	till_label.position = Vector3(near_x if side < 0 else near_x - 0.6, 3.4, Plot.ROAD_Z - 0.4)
 	add_child(till_label)
 	if not visited or not _has("campfire"):
 		return
@@ -438,24 +447,39 @@ func _labels() -> void:
 	add_child(pile_label)
 
 
+const LABEL_PX := 0.0082          # 1.7x the first version: readable on a 720-wide phone
+const LABEL_MAX_W := 3.9           # metres
+
+
+func _cue(s: String) -> String:
+	return "‹ " + s if side < 0 else s + " ›"
+
+
 func till() -> int:
 	return Game.till(k) if visited else 0
 
 
 ## Updates the cash pile and labels (Game.tills_changed).
 func refresh() -> void:
-	var name_s := String(Game.chapters[k].name).to_upper()
-	name_s = "‹ " + name_s if side < 0 else name_s + " ›"          # which way along the road it lies
+	var nm := String(Game.chapters[k].name).to_upper()
 	var cash := till()
+	var text := ""
+	# the arrow says which way along the road it lies
 	if not owned:
-		till_label.text = name_s + "\nFOR SALE"
+		text = _cue(nm) + "\nFOR SALE"
 		till_label.modulate = Color(1.0, 0.86, 0.6)
 	elif not visited:
-		till_label.text = name_s + "\nWALK IN"
+		text = _cue("WALK IN") + "\n" + nm
 		till_label.modulate = Color(0.75, 1.0, 0.65)
 	else:
-		till_label.text = name_s + ("\n%s waiting" % UI.cash(cash) if cash > 0 else "")
+		# the cue gets its own line: one "WALK TO <NAME>" line was too wide for a portrait screen
+		text = _cue("WALK TO") + "\n" + nm + ("\n%s waiting" % UI.cash(cash) if cash > 0 else "")
 		till_label.modulate = Color(1, 1, 1)
+	if text != till_label.text:
+		till_label.text = text
+		# long names shrink a little so the label never runs under the HUD buttons or off screen
+		var w := till_label.font.get_multiline_string_size(text, HORIZONTAL_ALIGNMENT_CENTER, -1, till_label.font_size).x
+		till_label.pixel_size = minf(LABEL_PX, LABEL_MAX_W / maxf(1.0, w))
 	if coins_mm:
 		coins_mm.visible_instance_count = mini(54, int(ceil(cash / 5.0)))
 	if pile_label:

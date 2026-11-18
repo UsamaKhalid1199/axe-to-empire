@@ -37,8 +37,14 @@ var bd_banner: UIShape
 var bd_title: Label
 var bd_info: Label
 var bd_bar: ProgressBar
-var _story_q: Array = []
+var _story_q: Array = []          # story cards waiting (consecutive lines by one speaker are one card)
 var _story_showing := false
+var _story_replay := false        # Settings > Story: show the whole chapter back to back
+var _story_last_s := -1000.0      # _play_s when the last story card closed
+var _play_s := 0.0                # seconds of play since this HUD was built
+var _ui_tap_ms := -100000         # last touch/click anywhere: no story card pops right under a finger
+const STORY_GAP_S := 45.0         # at most one story card per this much play
+const STORY_TAP_GUARD_MS := 500
 var _bd_result: Array = []
 var till_chip: UIShape            # "$12.3K waiting at Forest Camp": opens the map
 var till_label: Label
@@ -264,6 +270,7 @@ func show_toast(text: String) -> void:
 
 
 func _process(delta: float) -> void:
+	_play_s += delta
 	# animated coin counter
 	var target := float(Game.coins)
 	if absf(_coin_shown - target) > 0.5:
@@ -271,7 +278,7 @@ func _process(delta: float) -> void:
 		if absf(_coin_shown - target) < 1.0:
 			_coin_shown = target
 	coin_label.text = UI.cash(round(_coin_shown))
-	served_label.text = str(Game.served)
+	served_label.text = UI.fmt(Game.served)
 	stars_label.text = str(Game.total_stars())
 	_tick_overlays()
 	if map_btn:
@@ -303,6 +310,7 @@ func _process(delta: float) -> void:
 	if _toast_t <= 0.0 and not _toast_q.is_empty():
 		toast_label.text = _toast_q.pop_front()
 		UI.fit(toast_label, _vw() - 300.0, 30, 24)   # clear of the side buttons
+		UI.balance(toast_label)                       # no lone last word on its own line
 		toast_box.size = Vector2.ZERO
 		toast_box.size = toast_box.get_combined_minimum_size()
 		toast_box.position = Vector2((_vw() - toast_box.size.x) * 0.5, 0.0)
@@ -380,9 +388,11 @@ func open_modal(kind: String) -> void:
 		elif _dim_down:
 			_dim_down = false
 			var hit := _side_button_at(dim.get_global_transform() * e.position)
-			close_modal()
 			if hit:
-				hit.pressed.emit())
+				close_modal()
+				hit.pressed.emit()
+			else:
+				_close_or_back())
 	modal.add_child(dim)
 	_rebuild_queued = false
 	_rebuild_modal_now()
@@ -406,6 +416,8 @@ func close_modal() -> void:
 	joy.blocked = false
 	_confirm_reset = false
 	_confirm_prestige = false
+	if _story_q.is_empty():
+		_story_replay = false
 	if not _story_q.is_empty():
 		_next_story.call_deferred()
 	elif Game.offline_reward > 0:
@@ -445,6 +457,8 @@ var _dim_down := false
 
 
 func _input(e: InputEvent) -> void:
+	if e is InputEventScreenTouch or (e is InputEventMouseButton and e.button_index == MOUSE_BUTTON_LEFT):
+		_ui_tap_ms = Time.get_ticks_msec()
 	if e is InputEventScreenTouch:
 		_fingers = maxi(0, _fingers + (1 if e.pressed else -1))
 		_finger_ms = Time.get_ticks_msec()
@@ -527,9 +541,17 @@ func _header(v: VBoxContainer, icon_name: String, title: String, sub := "", clos
 		var x := UIShape.new("dark", 22.0, Vector4(16, 6, 16, 6)).make_clickable()
 		x.add_child(UI.label("✕", 30, Color.WHITE, UI.font_ui(600), HORIZONTAL_ALIGNMENT_CENTER))
 		x.custom_minimum_size = Vector2(84, 84)
-		x.pressed.connect(close_modal)
+		x.pressed.connect(_close_or_back)
 		h.add_child(x)
 	v.add_child(h)
+
+
+## ✕ on a Settings sub-screen (How to play, Stats) goes back to Settings; elsewhere it closes.
+func _close_or_back() -> void:
+	if modal_kind in ["howto", "stats"]:
+		open_modal("settings")
+	else:
+		close_modal()
 
 
 func _row(v: VBoxContainer, icon_name: String, title: String, desc: String, stat: String, btn: UIShape, extra: Control = null) -> void:
@@ -609,17 +631,33 @@ func _price_button(cost: int, cb: Callable, label_override := "") -> UIShape:
 
 # ------------------------------------------------------------------ panels
 
+## The star rules, worded once (game_state.gd _stars_of is the truth).
+const STAR3_HOW := "Star 3: win the Big Day with no walkouts and get every station to Lv 15+"
+const STAR_RULES := "Star 1: win the Big Day.  Star 2: serve twice the gate's guests with a 4.5★ rating.  " + STAR3_HOW + ".  Each star: +4% income everywhere."
+
 const TOOL_ICONS := {"axe": "axe", "double_axe": "double_axe", "chainsaw": "chainsaw", "harvester": "harvester"}
 
 
 func _shop(v: VBoxContainer) -> void:
 	_header(v, "hammer", "Tool Shed", "Upgrades apply instantly")
+	_gear_rows(v, true)
+	var ub := UI.button("KITCHEN, MENU & STATION UPGRADES", "dark", "upgrade", 24)
+	ub.pressed.connect(func(): open_modal("upgrades"))
+	v.add_child(ub)
+
+
+## Tool, backpack and boots rows (normal levels, then Pro levels, then MAX). The shop and the ME screen share
+## these so both always show the same thing. Away from the shed (`at_shop` false) the next tool needs the shed built.
+func _gear_rows(v: VBoxContainer, at_shop: bool) -> void:
 	var cur: Dictionary = Game.tool()
 	var nt := Game.next_upgrade("tool")
 	var tp: int = Game.pro.tool
 	var tname: String = String(cur.name) + (" Pro %d" % tp if tp > 0 else "")
 	if nt.is_empty():
 		_row(v, TOOL_ICONS[cur.id], tname, cur.desc, "Best tool, fully tuned", _price_button(0, Callable(), "MAX"))
+	elif not at_shop and not Game.built.has("shop"):
+		var nname: String = (String(cur.name) + " Pro %d" % int(nt.pro)) if nt.has("pro") else String(nt.name)
+		_row(v, TOOL_ICONS[cur.id], tname, cur.desc, "Next: %s · build the %s" % [nname, String(Game.build_def("shop").name).to_lower()], _price_button(0, Callable(), "LOCKED"))
 	elif nt.has("pro"):
 		_row(v, TOOL_ICONS[cur.id], String(cur.name) + " Pro %d" % int(nt.pro), "Tune your tool: +10% chop speed",
 			"+%d%% speed  →  +%d%%" % [10 * tp, 10 * int(nt.pro)], _price_button(int(nt.cost), func(): Game.buy_upgrade("tool")))
@@ -646,9 +684,6 @@ func _shop(v: VBoxContainer) -> void:
 		else:
 			_row(v, t[1], t[2], t[3], fmtf.call(cur_d) + "  →  " + fmtf.call(nx),
 				_price_button(int(nx.cost), func(): Game.buy_upgrade(key)))
-	var ub := UI.button("KITCHEN, MENU & STATION UPGRADES", "dark", "upgrade", 24)
-	ub.pressed.connect(func(): open_modal("upgrades"))
-	v.add_child(ub)
 
 
 func _crew(v: VBoxContainer) -> void:
@@ -682,7 +717,7 @@ func _jobs(v: VBoxContainer) -> void:
 		bar.max_value = j.goal
 		bar.value = j.prog
 		pr.add_child(bar)
-		pr.add_child(UI.label("%d/%d" % [j.prog, j.goal], 20, UI.MUTED))
+		pr.add_child(UI.label("%s/%s" % [UI.fmt(j.prog), UI.fmt(j.goal)], 20, UI.MUTED))
 		tv.add_child(pr)
 		h.add_child(tv)
 		var b: UIShape
@@ -730,7 +765,7 @@ func _jobs(v: VBoxContainer) -> void:
 
 func _offline(v: VBoxContainer) -> void:
 	_header(v, "clock", "Welcome back", "", false)
-	var wl := UI.label("Your crew saved this for you.", 24, UI.MUTED, null, HORIZONTAL_ALIGNMENT_CENTER)
+	var wl := UI.label("Here's your cash, ready to collect.", 24, UI.MUTED, null, HORIZONTAL_ALIGNMENT_CENTER)
 	wl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	v.add_child(wl)
 	var amt := UI.hbox(12)
@@ -760,7 +795,7 @@ func _gate(v: VBoxContainer) -> void:
 	var need_built: Array = ["tables_2", "crew_hut"] + (["special"] if Game.special_type() != "" else [])
 	var reqs := [
 		[s.built, "Build every upgrade here", "%d / %d" % [need_built.filter(func(id): return Game.built.has(id)).size(), need_built.size()]],
-		[s.served, "Serve %d guests" % int(g.served), "%d / %d" % [mini(Game.vserved, int(g.served)), int(g.served)]],
+		[s.served, "Serve %s guests" % UI.fmt(int(g.served)), "%s / %s" % [UI.fmt(mini(Game.vserved, int(g.served))), UI.fmt(int(g.served))]],
 		[s.rating, "Keep a %.1f★ rating" % float(g.rating), "%.1f now" % Game.rating()],
 		[s.coins, "Save %s (you keep it)" % UI.cash(int(g.coins)), "%s / %s" % [UI.cash(mini(Game.coins, int(g.coins))), UI.cash(int(g.coins))]],
 		[s.bigday, "Win the Big Day: " + String(Game.big_day_def().get("name", "")), "WON" if s.bigday else ("ready" if s.built else "build first")],
@@ -780,7 +815,7 @@ func _gate(v: VBoxContainer) -> void:
 		var replay: bool = Game.bigday.get("won", false)
 		var bdd: Dictionary = Game.big_day_def()
 		var info := UI.label("%s: %s
-Serve %d guests in %d:%02d. More than %d walkouts and it's over. %s" % [String(bdd.name), String(bdd.desc), int(bdd.goal), int(bdd.seconds) / 60, int(bdd.seconds) % 60, int(bdd.get("max_walkouts", 10)), "Replay it with no walkouts to earn the third star." if replay else "Tip: fill the woodpile and the rack first!"], 22, UI.GOLD_LIGHT, null, HORIZONTAL_ALIGNMENT_CENTER)
+Serve %d guests in %d:%02d. More than %d walkouts and it's over. %s" % [String(bdd.name), String(bdd.desc), int(bdd.goal), int(bdd.seconds) / 60, int(bdd.seconds) % 60, int(bdd.get("max_walkouts", 10)), STAR3_HOW + "." if replay else "Tip: fill the woodpile and the rack first!"], 22, UI.GOLD_LIGHT, null, HORIZONTAL_ALIGNMENT_CENTER)
 		info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		v.add_child(info)
 		var cool: float = world._bd_cool
@@ -794,7 +829,12 @@ Serve %d guests in %d:%02d. More than %d walkouts and it's over. %s" % [String(b
 	if Game.chapter_done:
 		# road already open: send the player on (or to the New Empire screen in the last chapter)
 		var go := UI.button("START A NEW EMPIRE" if last else "GO TO " + String(nx.name).to_upper(), "green", "gate", 30)
-		go.pressed.connect(func(): open_modal("complete" if last else "empire"))
+		go.pressed.connect(func():
+			if last:
+				open_modal("complete")
+			else:
+				close_modal()
+				get_tree().current_scene.travel_to(Game.venue + 1))
 		v.add_child(go)
 		return
 	if not last:
@@ -816,13 +856,14 @@ Serve %d guests in %d:%02d. More than %d walkouts and it's over. %s" % [String(b
 func _complete(v: VBoxContainer) -> void:
 	var ch: Dictionary = Game.chapter()
 	var last := Game.is_last_chapter()
-	_header(v, "star", "Chapter %d complete!" % (Game.venue + 1), String(ch.name) + " · mastered", false)
+	var nstars := Game.star_count()
+	_header(v, "star", "Chapter %d complete!" % (Game.venue + 1), String(ch.name) + (" · mastered" if nstars >= 3 else ""), false)
 	var grid := GridContainer.new()
 	grid.columns = 2
 	grid.add_theme_constant_override("h_separation", 14)
 	grid.add_theme_constant_override("v_separation", 14)
 	var mins := int(Game.stats.play_s / 60.0)
-	for s in [["Guests served here", str(Game.vserved)], ["Stars here", "%d / 3" % Game.star_count()],
+	for s in [["Guests served here", UI.fmt(Game.vserved)], ["Stars here", "%d / 3" % nstars],
 			["Cash earned (all)", UI.cash(Game.stats.earned)], ["Time played (all)", "%dh %02dm" % [mins / 60, mins % 60]]]:
 		var c := UIShape.new("dark", 20.0, Vector4(18, 12, 18, 12))
 		c.custom_minimum_size.x = 285
@@ -841,6 +882,10 @@ func _complete(v: VBoxContainer) -> void:
 	var l := UI.label(txt, 22, UI.MUTED, null, HORIZONTAL_ALIGNMENT_CENTER)
 	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	v.add_child(l)
+	if nstars < 3 and not _confirm_prestige:
+		var sl := UI.label(STAR_RULES, 19, UI.GOLD_LIGHT, null, HORIZONTAL_ALIGNMENT_CENTER)
+		sl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		v.add_child(sl)
 	if last and not _confirm_prestige:
 		var pb := UI.button("START NEW EMPIRE  (+50%)", "green", "star", 30)
 		pb.pressed.connect(func():
@@ -873,6 +918,8 @@ func _complete(v: VBoxContainer) -> void:
 			close_modal()
 			get_tree().current_scene.travel_to(Game.venue + 1))
 		v.add_child(tb)
+	if _confirm_prestige:
+		return                 # "Keep playing" / "Start over" are the only choices while confirming
 	var b := UI.button("STAY HERE", "dark", "", 28)
 	b.pressed.connect(close_modal)
 	v.add_child(b)
@@ -887,7 +934,7 @@ func _empire(v: VBoxContainer) -> void:
 	if waiting > 0:
 		sub = "%s waiting on your counters. Go there to collect it." % UI.cash(waiting)
 	elif er > 0:
-		sub = "Your other places earn %s/min while you play" % UI.cash(er)
+		sub = "Your other places: earns %s while you play" % _per_min(er)
 	else:
 		sub = "Your places keep working while you play"
 	_header(v, "gate", "Your Empire", sub)
@@ -908,7 +955,7 @@ func _empire(v: VBoxContainer) -> void:
 		if k == Game.venue:
 			btn = _price_button(0, Callable(), "HERE")
 			var pr := Game.passive_rate() * 60.0
-			stat = ("You are here · crew makes %s/min" % UI.cash(pr)) if pr > 0 else "You are here"
+			stat = ("You are here · earns %s while you play" % _per_min(pr)) if pr > 0 else "You are here · hire crew to earn"
 		elif k < Game.unlocked:
 			btn = UI.button("TRAVEL", "green", "", 28, 150)
 			var kk := k
@@ -916,8 +963,9 @@ func _empire(v: VBoxContainer) -> void:
 				close_modal()
 				get_tree().current_scene.travel_to(kk))
 			var r := Game.venue_rate(k) * 60.0 * Game.VENUE_EFFICIENCY
-			stat = ("Earns %s/min while you play" % UI.cash(r)) if r > 0 else "No crew yet: hire some there"
-			extra = _till_meter(k)
+			stat = ("Earns %s while you play" % _per_min(r)) if r > 0 else "Hire crew there to earn"
+			if r > 0 or Game.till(k) > 0:      # no crew and nothing waiting: no empty $0 meter
+				extra = _till_meter(k)
 		else:
 			btn = _price_button(0, Callable(), "LOCKED")
 			stat = "The land next door: open it at %s's gate" % String(Game.chapters[k - 1].name) if k == Game.unlocked \
@@ -939,14 +987,16 @@ func _empire(v: VBoxContainer) -> void:
 var _map_tills: Array = []          # [k, Label, ProgressBar] of the open map, updated in place
 
 
-## "Cash waiting $1,240 / $3,600" with a fill bar: place k's counter and how much it holds.
+## "$1,240 / $3,600" ("... · FULL" when the counter is full) with a fill bar: place k's counter and how much it holds.
 func _till_meter(k: int) -> Control:
 	var col := UI.vbox(4)
 	col.name = "Till%d" % k
 	var l := UI.label("", 21, UI.CASH, UI.font_ui(650))
 	l.name = "TillText"
+	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	l.custom_minimum_size.x = 200
 	col.add_child(l)
-	var bar := UI.progress_bar(240, 10)
+	var bar := UI.progress_bar(200, 10)
 	var fg := StyleBoxFlat.new()
 	fg.bg_color = UI.CASH
 	fg.set_corner_radius_all(5)
@@ -960,7 +1010,7 @@ func _till_meter(k: int) -> Control:
 func _set_till_meter(k: int, l: Label, bar: ProgressBar) -> void:
 	var t := Game.till(k)
 	var cap := Game.till_cap(k)
-	l.text = ("Cash waiting: %s / %s" % [UI.cash(t), UI.cash(cap)]) + ("  FULL" if t >= cap else "")
+	l.text = ("%s / %s" % [UI.cash(t), UI.cash(cap)]) + (" · FULL" if t >= cap else "")
 	bar.max_value = maxi(1, cap)
 	bar.value = t
 
@@ -969,6 +1019,11 @@ func _refresh_map_tills() -> void:
 	for m in _map_tills:
 		if is_instance_valid(m[1]):
 			_set_till_meter(m[0], m[1], m[2])
+
+
+## "$1,746/min" that never wraps between the amount and "/min" (word joiners).
+func _per_min(per_min: float) -> String:
+	return UI.cash(per_min) + "\u2060/\u2060min"
 
 
 func _hours(h: float) -> String:
@@ -1043,7 +1098,7 @@ func _refresh_task() -> void:
 	task_bar.visible = true
 	task_bar.max_value = p[1]
 	task_bar.value = p[0]
-	task_prog.text = "%d/%d" % p if p[1] > 1 else ""
+	task_prog.text = ("%s/%s" % [UI.fmt(p[0]), UI.fmt(p[1])]) if p[1] > 1 else ""
 	task_btn.visible = true
 	var done: bool = p[0] >= p[1]
 	UI.set_button_text(task_btn, ("CLAIM " if done else "") + UI.cash(Game.task_reward(t)))
@@ -1088,6 +1143,8 @@ func _tick_overlays() -> void:
 	if _till_dirty:
 		_refresh_till_chip()
 	_place_till_chip()
+	if not _story_q.is_empty() and modal_kind == "":
+		_next_story()
 
 
 # ------------------------------------------------------------------ cash waiting at your other places
@@ -1207,8 +1264,8 @@ func _bigday_result(v: VBoxContainer) -> void:
 		txt = "Big Day won! You can buy the land next door: unlock it at the gate."
 		if Game.is_last_chapter():
 			txt = "The critic loved it. Finish the empire at the gate!"
-		if not Game.bigday.get("clean", false):
-			txt += " Win it with no walkouts for the third star."
+		if not Game.stars()[2]:
+			txt += " " + STAR3_HOW + "."
 	else:
 		txt = "Upgrade the kitchen and menu, hire help, stock the rack, then try again."
 	var tl := UI.label(txt, 22, UI.MUTED, null, HORIZONTAL_ALIGNMENT_CENTER)
@@ -1224,17 +1281,35 @@ func _bigday_result(v: VBoxContainer) -> void:
 func _on_story(beats: Array) -> void:
 	if not Game.settings.get("story", true):
 		return
-	_story_q.append_array(beats)
+	_story_q.append_array(_merge_beats(beats))
 	if modal_kind == "":
 		_next_story.call_deferred()
 
 
+## Lines in a row by the same speaker become one card.
+func _merge_beats(beats: Array) -> Array:
+	var out: Array = []
+	for b in beats:
+		if not out.is_empty() and String(out[-1].who) == String(b.who):
+			var m: Dictionary = out[-1].duplicate()
+			m.text = String(m.text) + "\n\n" + String(b.text)
+			out[-1] = m
+		else:
+			out.append(b)
+	return out
+
+
+## Shows the next queued story card when it's a good moment: no modal, no finger down or just lifted,
+## not walking, and at most one card per STORY_GAP_S of play. Polled from _tick_overlays, so a card
+## that has to wait simply shows later.
 func _next_story() -> void:
 	if _story_q.is_empty() or modal_kind != "":
 		return
-	if joy.active:
-		get_tree().create_timer(0.6).timeout.connect(_next_story)
-		return
+	if not _story_replay:
+		if joy.active or _fingers > 0 or Time.get_ticks_msec() - _ui_tap_ms < STORY_TAP_GUARD_MS:
+			return
+		if _play_s - _story_last_s < STORY_GAP_S:
+			return
 	open_modal("story")
 
 
@@ -1261,13 +1336,17 @@ func _story(v: VBoxContainer) -> void:
 	tx.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	tx.custom_minimum_size.x = 560
 	v.add_child(tx)
-	var nb := UI.button("NEXT" if _story_q.size() > 1 else "OK", "gold", "", 30)
+	var more := _story_replay and _story_q.size() > 1
+	var nb := UI.button("NEXT" if more else "OK", "gold", "", 30)
 	nb.pressed.connect(func():
 		_story_q.pop_front()
-		if _story_q.is_empty():
-			close_modal()
+		if more:
+			_rebuild_modal()
 		else:
-			_rebuild_modal())
+			_story_last_s = _play_s
+			if _story_q.is_empty():
+				_story_replay = false
+			close_modal())
 	v.add_child(nb)
 
 
@@ -1341,7 +1420,7 @@ func _upgrades(v: VBoxContainer) -> void:
 					_rebuild_modal())
 		var ic: String = SPECIAL_ICONS.get(Game.special_type(), "upgrade") if key == "station" else STATION_ICONS.get(key, "star")
 		_row(list, ic, title, String(d.desc), stat, btn)
-	var info := UI.label("Star 1: win the Big Day.  Star 2: serve twice the gate's guests with a 4.5 rating.  Star 3: a Big Day with no walkouts and every station at Lv 15+.  Each star: +4% income everywhere.", 19, UI.MUTED, null, HORIZONTAL_ALIGNMENT_CENTER)
+	var info := UI.label(STAR_RULES, 19, UI.MUTED, null, HORIZONTAL_ALIGNMENT_CENTER)
 	info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	v.add_child(info)
 
@@ -1362,24 +1441,7 @@ func _character(v: VBoxContainer) -> void:
 	sc.add_child(list)
 	v.add_child(sc)
 	list.add_child(UI.label("GEAR", 24, UI.GOLD_LIGHT, UI.font_bold()))
-	var cur: Dictionary = Game.tool()
-	var nt := Game.next_upgrade("tool")
-	if nt.is_empty():
-		_row(list, TOOL_ICONS[cur.id], cur.name, cur.desc, "Best tool owned", _price_button(0, Callable(), "MAX"))
-	elif not Game.built.has("shop"):
-		_row(list, TOOL_ICONS[cur.id], cur.name, cur.desc, "Next: %s · build the %s" % [nt.name, String(Game.build_def("shop").name).to_lower()], _price_button(0, Callable(), "LOCKED"))
-	else:
-		_row(list, TOOL_ICONS[nt.id], nt.name, nt.desc, "Now: " + String(cur.name), _price_button(int(nt.cost), func(): Game.buy_upgrade("tool")))
-	for t in [["bag", "bag", "Backpack", "Carry more logs per trip", func(d): return "%d logs" % int(d.cap)],
-			["boots", "boots", "Trail boots", "Run faster", func(d): return "+%d%% speed" % int(round((float(d.mult) - 1.0) * 100))]]:
-		var key: String = t[0]
-		var nx := Game.next_upgrade(key)
-		var cd: Dictionary = Game.cfg[key][Game.levels[key]]
-		var fmtf: Callable = t[4]
-		if nx.is_empty():
-			_row(list, t[1], t[2], t[3], fmtf.call(cd) + "  (max)", _price_button(0, Callable(), "MAX"))
-		else:
-			_row(list, t[1], t[2], t[3], fmtf.call(cd) + "  →  " + fmtf.call(nx), _price_button(int(nx.cost), func(): Game.buy_upgrade(key)))
+	_gear_rows(list, false)
 	if not ClassDB.class_exists("Wardrobe") and not ResourceLoader.exists("res://scripts/core/wardrobe.gd"):
 		return
 	list.add_child(UI.label("WARDROBE", 24, UI.GOLD_LIGHT, UI.font_bold()))
@@ -1524,7 +1586,8 @@ func _replay_story() -> void:
 	for b in ch.get("beats", []):
 		if b.on == "start" or Game.seen.has(b.on + ":1") or Game.seen.keys().any(func(k): return String(k).begins_with(String(b.on) + ":")):
 			beats.append(b)
-	_story_q.append_array(beats)
+	_story_q = _merge_beats(beats)
+	_story_replay = true
 	_next_story()
 
 
@@ -1560,9 +1623,9 @@ func _stats(v: VBoxContainer) -> void:
 	grid.add_theme_constant_override("v_separation", 12)
 	var mins := int(Game.stats.play_s / 60.0)
 	for s in [["Cash earned", UI.cash(Game.stats.earned)], ["Guests served", UI.fmt(Game.stats.served)],
-			["Trees felled", UI.fmt(Game.stats.trees)], ["Golden trees", str(int(Game.stats.get("golden", 0)))],
-			["Walkouts", str(int(Game.stats.get("walkouts", 0)))], ["Lost to full lines", str(int(Game.stats.get("lost", 0)))],
-			["Big Days won", str(int(Game.stats.get("bigdays", 0)))], ["Stars", "%d / %d" % [Game.total_stars(), Game.chapters.size() * 3]],
+			["Trees felled", UI.fmt(Game.stats.trees)], ["Golden trees", UI.fmt(int(Game.stats.get("golden", 0)))],
+			["Walkouts", UI.fmt(int(Game.stats.get("walkouts", 0)))], ["Lost to full lines", UI.fmt(int(Game.stats.get("lost", 0)))],
+			["Big Days won", UI.fmt(int(Game.stats.get("bigdays", 0)))], ["Stars", "%d / %d" % [Game.total_stars(), Game.chapters.size() * 3]],
 			["Logs sold", UI.fmt(Game.stats.sold)], ["Time played", "%dh %02dm" % [mins / 60, mins % 60]]]:
 		var c := UIShape.new("dark", 18.0, Vector4(16, 10, 16, 10))
 		c.custom_minimum_size.x = 288

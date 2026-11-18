@@ -96,7 +96,8 @@ func _process(delta: float) -> void:
 			if walk(delta):
 				state = "queue"
 		"queue":
-			waited += delta
+			if world.modal_kind == "":
+				waited += delta     # patience holds while a modal or story card covers the game
 			var front: bool = slot == 0
 			if not bubble.visible:
 				bubble.visible = true

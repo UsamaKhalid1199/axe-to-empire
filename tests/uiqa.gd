@@ -53,7 +53,7 @@ func _run() -> void:
 		g.tills_changed.emit()
 		await _shot("ch%d_tillchip" % k)
 		# longest toasts
-		for t in ["New place! Your $123.4M came with you, and your crew set up the grill",
+		for t in ["Welcome next door! Your $123.4M came with you, and your crew set up the grill.",
 				"Gate fees refunded: +$20,000. Your savings now always come with you!",
 				"Not enough cash: serve guests, then come back to build",
 				String(g.special_def().get("intro", ""))]:
@@ -72,7 +72,7 @@ func _run() -> void:
 		w._bd_cool = 0.0
 		await _shot("ch%d_reno" % k)
 		hud._toast_q.clear(); hud._toast_t = 0.0
-		hud.show_toast("New place! Your $123.4M came with you, and your crew set up the grill")
+		hud.show_toast("Welcome next door! Your $123.4M came with you, and your crew set up the grill.")
 		await _shot("ch%d_reno_toast" % k)
 		g.reno = {}
 		for m in ["gate", "upgrades", "character", "settings", "jobs", "crew", "shop", "empire", "complete", "stats", "howto", "offline"]:
