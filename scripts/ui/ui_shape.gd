@@ -80,6 +80,7 @@ func _draw() -> void:
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_ENTER_TREE:
 		_entered_ms = Time.get_ticks_msec()
+		_entered_frame = Engine.get_process_frames()
 	# a plain panel (row background, swatch frame) inside a scroll list must let drags through to the list
 	if what == NOTIFICATION_ENTER_TREE and not clickable and mouse_filter == Control.MOUSE_FILTER_STOP and _scroll_parent() != null:
 		mouse_filter = Control.MOUSE_FILTER_PASS
@@ -101,6 +102,8 @@ static var _last_tap_rect := Rect2()
 static var prev_tap_ms := -100000          # the tap before that (the HUD's side buttons check it)
 static var prev_tap_pos := Vector2.ZERO
 var _entered_ms := -100000
+var _entered_frame := -100000
+static var _last_tap_frame := -100000
 var _down_ms := 0
 var _down_global := Vector2.ZERO
 
@@ -110,7 +113,10 @@ var _down_global := Vector2.ZERO
 ## FRESH_MS of it, at about the same spot. Taps elsewhere go through, and so does a button rebuilt in the same
 ## place as the one just tapped (a list rebuilt after a buy takes repeat taps).
 func _fresh_block() -> bool:
-	if _entered_ms < _last_tap_ms or _entered_ms - _last_tap_ms > 120 or _down_ms - _last_tap_ms >= FRESH_MS:
+	# "built right after the tap": within a few frames of it (counting frames, so one slow frame on a weak
+	# phone doesn't open the guard)
+	var built_after := _entered_frame >= _last_tap_frame and (_entered_frame - _last_tap_frame <= 3 or _entered_ms - _last_tap_ms <= 120)
+	if not built_after or _down_ms - _last_tap_ms >= FRESH_MS:
 		return false
 	if _down_global.distance_to(_last_tap_pos) > FRESH_PX:
 		return false
@@ -137,6 +143,7 @@ func _fire() -> void:
 	prev_tap_ms = _last_tap_ms
 	prev_tap_pos = _last_tap_pos
 	_last_tap_ms = Time.get_ticks_msec()
+	_last_tap_frame = Engine.get_process_frames()
 	_last_tap_pos = _down_global
 	_last_tap_rect = get_global_rect()
 	Sfx.play("click")

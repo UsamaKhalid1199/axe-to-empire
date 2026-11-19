@@ -50,7 +50,10 @@ func _run() -> void:
 	var c_after := int(g.coins)
 	print("  stale jobs claimed: coins=%d streak=%d chest_claimed=%s" % [c_after, g.streak, g.chest_claimed])
 	g.refresh_jobs()   # what a restart does
-	ok(g.chest_claimed, "chest can't be claimed twice on the same calendar day (after restart chest_claimed=%s)" % g.chest_claimed)
+	# yesterday's chest belongs to yesterday's jobs; today's chest needs today's three jobs first
+	var c_before := int(g.coins)
+	g.claim_chest()
+	ok(int(g.coins) == c_before and not g.chest_claimed, "after the day rolls over, the new chest can't be claimed until today's jobs are done")
 	# restore
 	if keep != "":
 		f = FileAccess.open(g.SAVE_PATH, FileAccess.WRITE); f.store_string(keep); f.close()

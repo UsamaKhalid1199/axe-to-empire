@@ -275,7 +275,7 @@ func _round_button(icon_name: String, text: String, cb: Callable) -> UIShape:
 	b.pressed.connect(func():
 		# the second tap of a double tap on a modal's ✕ (or any closing button over this column) lands here
 		# once the modal has gone: ignore a tap at the same spot just after a close
-		if Time.get_ticks_msec() - _closed_ms < 400 and UIShape.prev_tap_ms >= _closed_ms - 120 				and b.press_pos().distance_to(UIShape.prev_tap_pos) < UIShape.FRESH_PX:
+		if _close_tap and Time.get_ticks_msec() - _closed_ms < 400 				and b.press_pos().distance_to(_close_tap_pos) < UIShape.FRESH_PX:
 			return
 		cb.call())
 	return b
@@ -516,6 +516,9 @@ func close_modal() -> void:
 	modal = null
 	modal_kind = ""
 	_closed_ms = Time.get_ticks_msec()
+	# closed by a tap on the modal (✕, a button), not by code or Back: the tap came after the modal opened
+	_close_tap = _closed_ms - UIShape._last_tap_ms <= 120 and UIShape._last_tap_ms > _modal_opened_ms
+	_close_tap_pos = UIShape._last_tap_pos
 	joy.blocked = false
 	_confirm_reset = false
 	_confirm_prestige = false
@@ -561,6 +564,8 @@ var _price_btns: Array = []
 var _gate_refresh_ms := 0
 var _modal_opened_ms := 0
 var _closed_ms := -100000       # when the last modal closed (side buttons ignore taps just after)
+var _close_tap := false         # ... and whether a tap closed it, and where (only that spot is guarded)
+var _close_tap_pos := Vector2.ZERO
 var _dim_down := false
 
 
