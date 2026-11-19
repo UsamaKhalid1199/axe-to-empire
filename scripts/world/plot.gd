@@ -466,24 +466,63 @@ static func band_node(k: int, x0: float, x1: float) -> Node3D:
 	return n
 
 
-## The band merged into one plain mesh per prop type, for a neighbour's flat bake (Art.bake_flat folds them into
-## its baked mesh: no extra draws there).
-static func band_meshes(k: int, x0: float, x1: float, parent: Node3D) -> void:
-	# merged once per session and stretch of road (a neighbour's picture is rebaked whenever what is built there
-	# changes; its band never does)
-	var meshes: Array = Art._c("band:%d:%s:%s" % [k, x0, x1], func():
-		var out: Array = []
+## The band merged into one plain mesh (one draw, band_mat), for a neighbour's picture. Built once per session and
+## stretch of road with packed-array maths (no SurfaceTool, no per-vertex script loops: the old SurfaceTool merge
+## plus folding it into the neighbour's flat bake took 0.2-0.5 s on desktop, several times that on the phone, on
+## the first walk to each place). Kept out of the flat bake, so rebaking a neighbour never touches it.
+static func band_mesh(k: int, x0: float, x1: float) -> ArrayMesh:
+	return Art._c("band:%d:%s:%s" % [k, x0, x1], func():
+		var vs := PackedVector3Array()
+		var ns := PackedVector3Array()
+		var cs := PackedColorArray()
 		for e in band(k, x0, x1):
-			var st := SurfaceTool.new()
-			st.begin(Mesh.PRIMITIVE_TRIANGLES)
+			var src: ArrayMesh = e[0]
+			var arr: Array = src.surface_get_arrays(0)
+			var v: PackedVector3Array = arr[Mesh.ARRAY_VERTEX]
+			var nn: PackedVector3Array = arr[Mesh.ARRAY_NORMAL] if arr[Mesh.ARRAY_NORMAL] != null else PackedVector3Array()
+			var cc: PackedColorArray = arr[Mesh.ARRAY_COLOR] if arr[Mesh.ARRAY_COLOR] != null else PackedColorArray()
+			var ind = arr[Mesh.ARRAY_INDEX]
+			if ind != null:          # (band meshes are unindexed; expand just in case)
+				var v2 := PackedVector3Array()
+				var n2 := PackedVector3Array()
+				var c2 := PackedColorArray()
+				for i in ind:
+					v2.append(v[i])
+					if not nn.is_empty():
+						n2.append(nn[i])
+					if not cc.is_empty():
+						c2.append(cc[i])
+				v = v2
+				nn = n2
+				cc = c2
+			if nn.is_empty():
+				nn.resize(v.size())
+				nn.fill(Vector3.UP)
+			if cc.is_empty():
+				cc.resize(v.size())
+				cc.fill(Color(1, 1, 1))
 			for xf in e[1]:
-				st.append_from(e[0], 0, xf)
-			var m := st.commit()
-			m.surface_set_material(0, Art.band_mat())
-			out.append(m)
-		return out)
-	for m in meshes:
-		var mi := MeshInstance3D.new()
-		mi.mesh = m
-		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		parent.add_child(mi)
+				var t: Transform3D = xf
+				vs.append_array(t * v)
+				ns.append_array(Transform3D(t.basis.inverse().transposed(), Vector3.ZERO) * nn)
+				cs.append_array(cc)
+		var am := ArrayMesh.new()
+		if vs.is_empty():
+			return am
+		var arrs := []
+		arrs.resize(Mesh.ARRAY_MAX)
+		arrs[Mesh.ARRAY_VERTEX] = vs
+		arrs[Mesh.ARRAY_NORMAL] = ns
+		arrs[Mesh.ARRAY_COLOR] = cs
+		am.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrs)
+		am.surface_set_material(0, Art.band_mat())
+		return am)
+
+
+## The band as one static mesh instance (see band_mesh).
+static func band_flat(k: int, x0: float, x1: float) -> MeshInstance3D:
+	var mi := MeshInstance3D.new()
+	mi.name = "RoadBand"
+	mi.mesh = band_mesh(k, x0, x1)
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	return mi

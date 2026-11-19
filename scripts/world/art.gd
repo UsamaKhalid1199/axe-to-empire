@@ -169,6 +169,34 @@ static func bake_flat(root: Node3D) -> MeshInstance3D:
 	var acc := {}            # texture (or the "" key) -> [verts, normals, colours, uvs, indices]
 	var order: Array = []
 	_bake_collect(root, Transform3D.IDENTITY, acc, order)
+	return _bake_finish(root, acc, order)
+
+
+## bake_flat spread over several calls (neighbour prebake, see NeighborPlot.prebake_steps): collect() takes the
+## root's parts a couple of ms at a time and returns true once all are in; finish() builds the mesh.
+class FlatBake:
+	var root: Node3D
+	var acc := {}
+	var order: Array = []
+	var i := 0
+
+	func _init(r: Node3D) -> void:
+		root = r
+
+	func collect() -> bool:
+		var t0 := Time.get_ticks_usec()
+		while i < root.get_child_count():
+			Art._bake_one(root.get_child(i), Transform3D.IDENTITY, acc, order)
+			i += 1
+			if Time.get_ticks_usec() - t0 > 2500:
+				break
+		return i >= root.get_child_count()
+
+	func finish() -> MeshInstance3D:
+		return Art._bake_finish(root, acc, order)
+
+
+static func _bake_finish(root: Node3D, acc: Dictionary, order: Array) -> MeshInstance3D:
 	for c in root.get_children():
 		root.remove_child(c)
 		c.free()
@@ -216,8 +244,12 @@ static func _flat_mat(key) -> StandardMaterial3D:
 ## path made one ArrayMesh per part and read it back: ~0.5 s for a neighbour's camp on the test phone).
 static func _bake_collect(n: Node, xf: Transform3D, acc: Dictionary, order: Array) -> void:
 	for c in n.get_children():
+		_bake_one(c, xf, acc, order)
+
+
+static func _bake_one(c: Node, xf: Transform3D, acc: Dictionary, order: Array) -> void:
 		if not (c is Node3D) or not c.visible:
-			continue
+			return
 		var cx: Transform3D = xf * c.transform
 		if c is MeshInstance3D and c.mesh and c.skin == null:
 			var nxf := Transform3D(cx.basis.orthonormalized(), Vector3.ZERO)

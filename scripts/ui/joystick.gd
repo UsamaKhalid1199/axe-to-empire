@@ -11,7 +11,7 @@ var active := false
 var origin := Vector2.ZERO
 var knob := Vector2.ZERO
 var touch_id := -1
-var hint_alpha := 1.0
+var hint_alpha := 1.0          # "Drag to move": stays until the player has really walked a few metres (Hud)
 var blocked := false
 
 
@@ -38,7 +38,6 @@ func _input(e: InputEvent) -> void:
 			active = true
 			origin = e.position
 			knob = origin
-			hint_alpha = 0.0
 			_emit()
 			get_viewport().set_input_as_handled()
 		elif not e.pressed and e.index == touch_id:
@@ -79,14 +78,23 @@ func _process(_d: float) -> void:
 func _draw() -> void:
 	if active:
 		_draw_stick(origin, knob, 1.0)
+		if hint_alpha > 0.0:
+			_draw_hint_text(origin)          # (a first touch alone does not teach it: keep the words under the thumb)
 	elif hint_alpha > 0.0:
 		var c := Vector2(size.x * 0.5, size.y - 260.0)
 		var k := c + Vector2(sin(Time.get_ticks_msec() * 0.003) * 40.0, 0)
 		_draw_stick(c, k, 0.7 * hint_alpha)
-		var f := UI.font_ui(600)
-		var t := "Drag to move"
-		var w := f.get_string_size(t, HORIZONTAL_ALIGNMENT_LEFT, -1, 26).x
-		draw_string(f, c + Vector2(-w * 0.5, RADIUS + 46), t, HORIZONTAL_ALIGNMENT_LEFT, -1, 26, Color(1, 1, 1, 0.85 * hint_alpha))
+		_draw_hint_text(c)
+
+
+func _draw_hint_text(c: Vector2) -> void:
+	var f := UI.font_ui(600)
+	var t := "Drag to move"
+	var w := f.get_string_size(t, HORIZONTAL_ALIGNMENT_LEFT, -1, 26).x
+	var at := c + Vector2(-w * 0.5, RADIUS + 46)
+	at.x = clampf(at.x, 12.0, maxf(12.0, size.x - w - 12.0))
+	at.y = minf(at.y, size.y - 24.0)
+	draw_string(f, at, t, HORIZONTAL_ALIGNMENT_LEFT, -1, 26, Color(1, 1, 1, 0.85 * hint_alpha))
 
 
 func _draw_stick(o: Vector2, k: Vector2, a: float) -> void:

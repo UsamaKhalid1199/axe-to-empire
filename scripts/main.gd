@@ -8,6 +8,7 @@ var _keep: Array = []       # holds preloaded resources so later load() calls hi
 
 
 func _ready() -> void:
+	get_tree().set_quit_on_go_back(false)       # Android back is ours (_notification): it never quits by itself
 	if OS.has_feature("mobile"):
 		_pick_quality()
 		Engine.max_fps = 30
@@ -49,6 +50,19 @@ func _ready() -> void:
 	await _build_venue(ls, 0.66)
 
 
+## Android back button: closes the open card first, else asks "Leave the game?" (Hud.go_back). Ignored while
+## loading or during a walk/MAP swap (the HUD is not ready for a modal then).
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_WM_GO_BACK_REQUEST:
+		on_back()
+
+
+func on_back() -> void:
+	if hud == null or not is_instance_valid(hud) or crossing or get_node_or_null("LoadingScreen") != null:
+		return
+	hud.go_back()
+
+
 ## Builds the active venue's world + HUD behind the loader (boot, travel, new empire).
 func _build_venue(ls: LoadingScreen, from: float, arrive := {}) -> void:
 	var ch: Dictionary = Game.chapter()
@@ -82,7 +96,67 @@ func _build_venue(ls: LoadingScreen, from: float, arrive := {}) -> void:
 		await _frames(2)
 	world.cam_look(world.cam_aim(world.player.global_position))
 	await _frames(6)
+	await _warm_offscreen()
 	ls.finish()
+
+
+## The quick swap draws the next place once into a small offscreen viewport (_prewarm) while the old place, lit
+## by its own sun, still shows: two suns, two cameras, two render targets. The first time a launch does that the
+## GPU sets it all up (about a second on the test phone, on the first walk after launch, every launch). Here the
+## same setup is drawn once behind the loading screen: half of the place just built goes on the prewarm layer, lit
+## by a stand-in second sun and seen by an offscreen camera, the other half by the main camera and the real sun.
+func _warm_offscreen() -> void:
+	if DisplayServer.get_name() == "headless" or world == null or world.cam == null:
+		return
+	var vis: Array = world.find_children("*", "VisualInstance3D", true, false)
+	var was := PackedInt32Array()
+	was.resize(vis.size())
+	for i in vis.size():
+		was[i] = vis[i].layers
+		if i % 2 == 0:
+			vis[i].layers = PREWARM_LAYER
+	var suns: Array = world.find_children("*", "DirectionalLight3D", false, false)
+	var sun_was: Array = []
+	for l in suns:
+		sun_was.append(l.light_cull_mask)
+		l.light_cull_mask = l.light_cull_mask & ~PREWARM_LAYER
+	var sun2 := DirectionalLight3D.new()
+	if not suns.is_empty():
+		var s0: DirectionalLight3D = suns[0]
+		sun2.light_color = s0.light_color
+		sun2.light_energy = s0.light_energy
+		sun2.shadow_enabled = s0.shadow_enabled
+		sun2.transform = s0.global_transform
+	sun2.light_cull_mask = PREWARM_LAYER
+	add_child(sun2)
+	var cam_mask: int = world.cam.cull_mask
+	world.cam.cull_mask = cam_mask & ~PREWARM_LAYER
+	var sv := SubViewport.new()
+	var vsz := get_viewport().get_visible_rect().size
+	sv.size = Vector2i(maxi(64, int(vsz.x * 0.25)), maxi(64, int(vsz.y * 0.25)))
+	sv.world_3d = get_viewport().find_world_3d()
+	sv.render_target_update_mode = SubViewport.UPDATE_ONCE
+	var c := Camera3D.new()
+	c.fov = world.cam.fov
+	c.keep_aspect = world.cam.keep_aspect
+	c.far = world.cam.far
+	c.cull_mask = PREWARM_LAYER
+	sv.add_child(c)
+	add_child(sv)
+	c.global_transform = world.cam.global_transform
+	c.current = true
+	await get_tree().process_frame
+	await get_tree().process_frame
+	sv.free()
+	sun2.free()
+	if is_instance_valid(world) and world.cam:
+		world.cam.cull_mask = cam_mask
+	for i in vis.size():
+		if is_instance_valid(vis[i]):
+			vis[i].layers = was[i]
+	for i in suns.size():
+		if is_instance_valid(suns[i]):
+			suns[i].light_cull_mask = sun_was[i]
 
 
 ## MAP / gate travel: the same quick swap as walking, with a "Travelling to X" card on the fade; you arrive on
@@ -178,7 +252,9 @@ func _swap(k: int, arrive: Dictionary, card: String) -> void:
 		if Time.get_ticks_usec() - frame_t > STEP_BUDGET_MS * 1000:
 			await get_tree().process_frame
 			frame_t = Time.get_ticks_usec()
+	var t_pre := Time.get_ticks_usec()
 	await _prewarm(nw)
+	var t_pre_done := Time.get_ticks_usec()
 	if tw.is_running():
 		await tw.finished
 	tw = create_tween()
@@ -218,7 +294,8 @@ func _swap(k: int, arrive: Dictionary, card: String) -> void:
 	var t_lit := Time.get_ticks_usec()
 	last_black_ms = (t_lit - t_black) / 1000.0
 	last_cross_detail = {"fade_out": (t_black - t0) / 1000.0, "built_in_black": dark_us / 1000.0, "build_frames": build_us / 1000.0,
-		"swap": (t_swap - t_black) / 1000.0, "first_frame": (t_drawn - t_swap) / 1000.0}
+		"swap": (t_swap - t_black) / 1000.0, "first_frame": (t_drawn - t_swap) / 1000.0,
+		"prewarm": (t_pre_done - t_pre) / 1000.0, "build_wall": (t_pre - t0) / 1000.0}
 	if marks.has("pre") and marks.has("post"):
 		last_cross_detail["frame_cpu"] = (int(marks.pre) - t_swap) / 1000.0         # process + physics of that frame
 		last_cross_detail["frame_draw"] = (int(marks.post) - int(marks.pre)) / 1000.0
@@ -457,6 +534,91 @@ func _perf_log(delta: float) -> void:
 		RenderingServer.get_rendering_info(RenderingServer.RENDERING_INFO_TOTAL_PRIMITIVES_IN_FRAME), Game.quality])
 
 
+## Debug-only draw census: if user://census exists, 12 s after a place opens, hides one kind of thing at a time for
+## a few frames and logs `CENSUS <kind> draws=-N` (what each kind costs in draw calls on this device).
+var _cen := -2
+var _cen_t := 0.0
+var _cen_base := 0
+var _cen_hidden: Array = []
+const CENSUS_SPOTS := [Vector3(0, 0, -3.6), Vector3(-2.0, 0, -13.0), Vector3(2.0, 0, 7.5), Vector3(-13.0, 0, 11.5), Vector3(13.0, 0, 11.5)]
+const CENSUS := ["base", "chars", "trees", "edge_forest", "scatter", "buildings", "special", "neighbours", "labels",
+	"particles", "stacks", "zones", "band", "hud", "other_world"]
+
+
+func _census_nodes(kind: String) -> Array:
+	var w := world
+	var out: Array = []
+	match kind:
+		"chars":
+			for s in w.find_children("*", "Skeleton3D", true, false): out.append(s.get_parent())
+		"trees":
+			for t in w.trees: out.append(t)
+			for n in w.get_children():
+				if n is MultiMeshInstance3D and not n.is_in_group("edge_forest") and not n.is_in_group("scatter"): out.append(n)
+		"edge_forest": out = get_tree().get_nodes_in_group("edge_forest").filter(func(n): return w.is_ancestor_of(n))
+		"scatter": out = get_tree().get_nodes_in_group("scatter").filter(func(n): return w.is_ancestor_of(n))
+		"buildings": out = w.buildings.values()
+		"special": out = [w.specials.root] if w.specials and w.specials.root else []
+		"neighbours": out = w.nb_plots.values()
+		"labels": out = w.find_children("*", "Label3D", true, false) + w.find_children("*", "Sprite3D", true, false)
+		"particles": out = w.find_children("*", "CPUParticles3D", true, false)
+		"stacks": out = w.find_children("*", "", true, false).filter(func(n): return n is Stack)
+		"zones": out = w.zones.duplicate()
+		"band": out = w.find_children("RoadBand", "", false, false)
+		"hud": out = [hud]
+		"other_world":
+			for n in w.get_children():
+				if n is VisualInstance3D and not (n is MultiMeshInstance3D): out.append(n)
+	return out.filter(func(n): return is_instance_valid(n) and n.visible)
+
+
+func _census_tick(delta: float) -> void:
+	if _cen == -2:
+		_cen = 0 if FileAccess.file_exists("user://census") else -1
+	if _cen < 0 or world == null or crossing or get_node_or_null("LoadingScreen") != null:
+		return
+	_cen_t += delta
+	if _cen == 0:
+		if _cen_t < 12.0:
+			return
+		# draws at a few spots first (camp, forest, dining, both road edges): 1.5 s each
+		var spot := int((_cen_t - 12.0) / 1.5)
+		if spot < CENSUS_SPOTS.size():
+			var want: Vector3 = CENSUS_SPOTS[spot]
+			if world.player.global_position.distance_to(want) > 0.5:
+				if spot > 0:
+					print("CENSUS spot %s draws=%d fps=%d" % [CENSUS_SPOTS[spot - 1], RenderingServer.get_rendering_info(
+						RenderingServer.RENDERING_INFO_TOTAL_DRAW_CALLS_IN_FRAME), Engine.get_frames_per_second()])
+				world.player.global_position = want
+			return
+		print("CENSUS spot %s draws=%d fps=%d" % [CENSUS_SPOTS[-1], RenderingServer.get_rendering_info(
+			RenderingServer.RENDERING_INFO_TOTAL_DRAW_CALLS_IN_FRAME), Engine.get_frames_per_second()])
+		world.player.global_position = CENSUS_SPOTS[0]
+		if _cen_t < 12.0 + CENSUS_SPOTS.size() * 1.5 + 1.5:
+			return
+		_cen_base = RenderingServer.get_rendering_info(RenderingServer.RENDERING_INFO_TOTAL_DRAW_CALLS_IN_FRAME)
+		print("CENSUS venue=%d base draws=%d fps=%d" % [Game.venue, _cen_base, Engine.get_frames_per_second()])
+		_cen = 1
+		_cen_t = 0.0
+		_cen_hidden = _census_nodes(CENSUS[_cen])
+		for n in _cen_hidden: n.visible = false
+		return
+	if _cen_t < 0.4:
+		return
+	var d := RenderingServer.get_rendering_info(RenderingServer.RENDERING_INFO_TOTAL_DRAW_CALLS_IN_FRAME)
+	print("CENSUS %s n=%d draws=-%d" % [CENSUS[_cen], _cen_hidden.size(), _cen_base - d])
+	for n in _cen_hidden:
+		if is_instance_valid(n): n.visible = true
+	_cen += 1
+	_cen_t = 0.0
+	if _cen >= CENSUS.size():
+		_cen = -1
+		print("CENSUS done")
+		return
+	_cen_hidden = _census_nodes(CENSUS[_cen])
+	for n in _cen_hidden: n.visible = false
+
+
 ## Debug-only on-device ablation: if user://probe exists, cycle render configs every 8 s and log fps.
 var _probe := -2
 var _probe_t := 0.0
@@ -511,12 +673,70 @@ func _probe_tick(delta: float) -> void:
 		_probe_set(_probe, true)
 
 
+## While you play, the pictures the places next door (and, after them, every place you own) will need of their
+## own neighbours are baked ahead of time a step at a time (NeighborPlot.prebake_steps), so the first walk or MAP
+## trip to a place is as quick as a warm one. One step (a few ms) every other frame at most, never during a swap,
+## the loading screen or while a left place is still being freed.
+const PREBAKE_START := 2.0          # seconds after a place opens before baking starts
+const PREBAKE_BUDGET_US := 3000
+var _pre_steps: Array = []
+var _pre_t := PREBAKE_START
+var _pre_skip := false
+
+
+func _prebake_tick(delta: float) -> void:
+	if crossing or world == null or not is_instance_valid(world) or world.player == null or not _reap.is_empty() 			or get_node_or_null("LoadingScreen") != null:
+		_pre_t = maxf(_pre_t, PREBAKE_START * 0.5)
+		return                       # (a plan in progress just waits: each step is self-contained)
+	if _pre_steps.is_empty():
+		_pre_t -= delta
+		if _pre_t > 0.0:
+			return
+		_pre_t = 4.0                 # re-plan now and then: building something changes a place's picture
+		_pre_steps = prebake_plan()
+		return
+	_pre_skip = not _pre_skip
+	if _pre_skip or not world.player.is_still():
+		return                       # (a first bake of a place's cooker can take a frame or two: not mid-run)
+	var t0 := Time.get_ticks_usec()
+	while not _pre_steps.is_empty() and Time.get_ticks_usec() - t0 < PREBAKE_BUDGET_US:
+		var r = (_pre_steps[0] as Callable).call()
+		if r is bool and r == false:
+			continue                 # a step that repeats (FlatBake.collect) until it says it is done
+		_pre_steps.pop_front()
+
+
+## Every neighbour picture a place next door would build on arrival, then those of every other owned place (MAP).
+static func prebake_plan() -> Array:
+	var order: Array = []
+	for side in [-1, 1]:
+		var n := Plot.neighbour(Game.venue, side)
+		if n >= 0 and n < Game.unlocked:
+			order.append(n)
+	for k in Game.unlocked:
+		if k != Game.venue and not order.has(k):
+			order.append(k)
+	var steps: Array = []
+	var masks: Array = []
+	for n in order:
+		masks.append([n, false])
+		for s in [-1, 1]:
+			var m := Plot.neighbour(n, s)
+			if m >= 0:
+				masks.append([m, not (m < Game.unlocked and (m == Game.venue or (m < Game.venues.size() and not Game.venues[m].is_empty())))])
+				steps.append_array(NeighborPlot.prebake_steps(m, s))
+	Plot.prefetch(masks)             # the ground masks too (worker threads; skips cached ones)
+	return steps
+
+
 func _process(delta: float) -> void:
 	_reap_tick()
+	_prebake_tick(delta)
 	if OS.has_feature("mobile") and OS.is_debug_build():
 		_perf_log(delta)
 		_probe_tick(delta)
 		_autowalk_tick(delta)
+		_census_tick(delta)
 	if not OS.has_feature("mobile") or _probe >= 0 or not Game.quality_auto or Game.quality == 0 or world == null:
 		return
 	if get_node_or_null("LoadingScreen") != null:

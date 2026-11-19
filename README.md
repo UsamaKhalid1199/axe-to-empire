@@ -33,7 +33,8 @@ Groups arrive in bursts, and a golden tree sometimes appears for a big cash rewa
 The story (`data/story.json`, design in `docs/DESIGN.md`): Old Mags and her ally in each chapter against the
 Grayline chain, told through story cards with portraits. The **ME** button opens the character screen (gear and a
 19-piece wardrobe from `data/outfits.json`), and Settings has sound, vibration, story cards, FPS, graphics, how to
-play, stats, story replay, reset and credits.
+play, stats, story replay, reset and credits. The Android back button closes the open card first; with nothing open
+it asks "Leave the game?" (Keep playing / Quit, saved first).
 
 | # | Venue | Product | Cooker | Signature station (new mechanic) | Cost scale |
 |---|---|---|---|---|---|
@@ -110,6 +111,9 @@ $G --headless --path . -s res://tests/upgradetest.gd -- <chapter>   # every upgr
 $G --headless --path . -s res://tests/qa/qa4_input.gd               # taps: X buttons, second finger, taps during rebuild/close/double-tap
 $G --headless --path . -s res://tests/qa/chapters_flow.gd           # next/previous chapter, travel, save/load, migration (~110 checks)
 $G --headless --path . -s res://tests/qa/cross_timing.gd            # walk 1-0-1-2-1 x5 + a first visit + MAP: black / build / stall ms
+$G --headless --path . -s res://tests/qa/qa_r4_edge.gd              # never out of the play area at a plot edge (turn back, held stick, Lake)
+$G --headless --path . -s res://tests/qa/qa_r4_pads.gd              # pads count the body on their edge; closest pad wins; part-paid pad finishes
+$G --headless --path . -s res://tests/qa/qa_r4_back.gd              # Android back, "Drag to move" hint, prompts held until the first build
 $G --headless --path . --script res://tests/regrowtest.gd           # stumps wait until the player leaves
 $G --headless --path . --script res://tests/harvtest.gd             # ride the harvester in the forest, walk in camp
 $G --headless --path . --script res://tests/specialtest.gd -- 1     # signature station of chapter 1..5 (player + crew)
@@ -148,13 +152,21 @@ Draw-call and skinning budget (on the test phone with a full camp: ~480 -> ~200 
 - Debug builds: `adb shell run-as com.bigosoft.axetoempire.proto touch files/probe` makes the next launch cycle
   through ablations (no characters, no trees, ...) and log `PROBE <name> fps=` lines; `touch files/autowalk` makes
   it walk across a plot edge every 7 s (and take a MAP trip every 12th time), logging `CROSS`, `AFTER` and `MAPT` lines.
+  `touch files/census` logs draw calls at a few spots and what each kind of thing costs (`CENSUS` lines).
 - Walking into the next plot and MAP travel use one quick swap (`main._swap`): the place you leave is frozen as a
   still picture while the screen dims and the next place builds behind it a few steps per frame, one frame of it is
   drawn off screen (`_prewarm`), and under black the two only trade places; the HUD stays and rebinds. The old
   place is freed a few nodes per frame afterwards, so shared materials and shaders never drop out of use (a
   dropped shader is recompiled on the phone). Many-part props and the character rig are packed once and
   instantiated (`Art._tmpl`, `CharacterRig._stripped_scene`); a neighbour's baked picture does not depend on its
-  woodpile (the logs are a MultiMesh), so walking back and forth reuses it.
+  woodpile (the logs are a MultiMesh), so walking back and forth reuses it. While you stand still, the pictures the
+  places next door (then every place you own) will need of their own neighbours are baked ahead of time, a few ms
+  every other frame (`main.prebake_plan`, `NeighborPlot.prebake_steps`), with their ground masks on worker threads;
+  the road band south of a neighbour is one cached mesh of its own (`Plot.band_mesh`), not part of that bake.
+- Plot edges: the road gap in the wall only opens while crossing is armed (arrivals stand 1 m inside; the edge
+  re-arms 1.6 m in, or after 2 s), and a player found outside the play area is walked across or put back.
+- Pads count the player's body over their edge (`Zone.REACH` 0.45 m); where pads are closer than that, only the
+  one the player is closest to (or inside) is active.
 
 Mobile settings: 30 fps cap, 3D render scale per graphics level (Smooth 0.6 / Balanced 0.75 / Beautiful 0.9),
 no MSAA, no realtime shadows or omni lights, vertex shading, 1K textures, arm64 only. Entry-level GPUs (PowerVR,

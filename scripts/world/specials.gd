@@ -173,17 +173,22 @@ func _build_hearth() -> void:
 		[Vector3(1.2, 2.4, 0.7), Vector3(0, 2.85, -0.45), stone],           # chimney
 		[Vector3(1.4, 0.18, 0.85), Vector3(0, 4.1, -0.45), dark_stone],     # chimney cap
 	]
+	# the static stonework, mantel and the logs in the grate: merged, one draw per material (was 11 draws)
+	var hearth := Node3D.new()
+	hearth.name = "Hearth"
+	root.add_child(hearth)
 	for pr in parts:
-		var b := Art.box(pr[0], pr[2], HEARTH + pr[1], root)
+		var b := Art.box(pr[0], pr[2], HEARTH + pr[1], hearth)
 		b.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
-	Art.box(Vector3(3.0, 0.16, 0.6), Art.plank_mat(), HEARTH + Vector3(0, 1.58, 0.05), root)
-	Art.box(Vector3(1.45, 1.1, 0.05), Art.paint(Color(0.05, 0.035, 0.03), 0.95), HEARTH + Vector3(0, 0.88, -0.2), root)
+	Art.box(Vector3(3.0, 0.16, 0.6), Art.plank_mat(), HEARTH + Vector3(0, 1.58, 0.05), hearth)
+	Art.box(Vector3(1.45, 1.1, 0.05), Art.paint(Color(0.05, 0.035, 0.03), 0.95), HEARTH + Vector3(0, 0.88, -0.2), hearth)
 	for k in 3:
 		var lg := MeshInstance3D.new()
 		lg.mesh = Art.log_mesh()
 		lg.position = HEARTH + Vector3(-0.3 + k * 0.3, 0.42, 0.0)
 		lg.rotation = Vector3(0, PI / 2 + (k - 1) * 0.3, 0)
-		root.add_child(lg)
+		hearth.add_child(lg)
+	Art.merge_static(hearth)
 	world._collider(HEARTH + Vector3(0, 1, -0.2), Vector3(2.8, 2, 1.3))
 	hearth_stack = Stack.new().setup("log", Stack.Layout.PILE)
 	hearth_stack.position = HEARTH + Vector3(2.0, 0.0, 0.1)

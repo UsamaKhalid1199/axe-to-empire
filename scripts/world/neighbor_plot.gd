@@ -8,7 +8,7 @@ extends Node3D
 ## Everything solid is baked into one vertex-coloured mesh (Art.bake_flat): about 6-9 draws in all, no shadows,
 ## no characters. Positioned at x = Plot.offset(); children use that plot's own coordinates.
 
-var world: Node
+var world                           # the active World (or, for prebake, the world.gd script: only its consts are used)
 var k := -1
 var side := -1                      # -1 = west of the active plot, +1 = east
 var owned := false
@@ -22,13 +22,16 @@ var coins_mm: MultiMesh
 var baked: MeshInstance3D
 
 
-func setup(w: Node, chapter: int, s: int) -> NeighborPlot:
+func setup(w, chapter: int, s: int) -> NeighborPlot:
 	world = w
 	k = chapter
 	side = s
 	name = "Neighbor_%s" % ("west" if s < 0 else "east")
 	owned = k < Game.unlocked
 	state = Game.venues[k] if k < Game.venues.size() else {}
+	if k == Game.venue:
+		# (only for prebake: the place you stand in, as its neighbours will see it once you walk over)
+		state = {"built": Game.built, "crew": Game.crew}
 	visited = owned and not state.is_empty()
 	theme = Game.chapters[k].get("theme", {})
 	near_x = Plot.east(k) if side < 0 else Plot.west(k)
@@ -50,18 +53,12 @@ func _ready() -> void:
 		baked.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		props.add_child(baked)
 	else:
-		if visited:
-			_camp(props)
-		elif owned:
-			_new_land(props)
-		else:
-			_for_sale(props)
-		# the low band south of the road, baked in with the rest (no extra draws)
-		Plot.band_meshes(k, minf(near_x, _far_x()), maxf(near_x, _far_x()), props)
+		for part in _parts(props):
+			part.call()
 		baked = Art.bake_flat(props)
-		if _bakes.size() > 16:
-			_bakes.clear()
-		_bakes[key] = baked.mesh
+		_store(key, baked.mesh)
+	# the low band south of the road: one cached mesh of its own (one draw; never rebaked)
+	add_child(Plot.band_flat(k, minf(near_x, _far_x()), maxf(near_x, _far_x())))
 	_log_pile()
 	_sign_labels()
 	_labels()
@@ -70,6 +67,51 @@ func _ready() -> void:
 
 
 static var _bakes: Dictionary = {}
+
+
+static func _store(key: String, mesh: Mesh) -> void:
+	if _bakes.size() > 24:
+		_bakes.clear()
+	_bakes[key] = mesh
+
+
+## What goes into the baked picture, as separate steps (so prebake can spread them over frames).
+func _parts(props: Node3D) -> Array:
+	if visited:
+		return _camp_parts(props)
+	if owned:
+		return [_new_land.bind(props)]
+	return [_for_sale.bind(props)]
+
+
+## Bakes the picture of place `chapter` as it will be seen from the place on its other side (`s` = which side of
+## that place it lies) ahead of time, while you play: main.gd runs the returned steps a few ms per frame, so the
+## first walk (or MAP trip) to a place finds its neighbours' pictures ready instead of building them behind the
+## dim. Returns [] when that picture is already cached. Also warms the road band of that stretch.
+static func prebake_steps(chapter: int, s: int) -> Array:
+	var np := NeighborPlot.new().setup(load("res://scripts/world/world.gd"), chapter, s)
+	var x0 := minf(np.near_x, np._far_x())
+	var x1 := maxf(np.near_x, np._far_x())
+	var steps: Array = []
+	if not Art._cache.has("band:%d:%s:%s" % [chapter, x0, x1]):
+		steps.append(func(): Plot.band_mesh(chapter, x0, x1))
+	var key := np._bake_key()
+	if _bakes.has(key):
+		np.free()
+		if not steps.is_empty():
+			steps.append(func(): pass)
+		return steps
+	var props := Node3D.new()
+	for part in np._parts(props):
+		steps.append(part)
+	var bake := Art.FlatBake.new(props)
+	steps.append(bake.collect)          # repeats itself until every part is collected (returns true when done)
+	steps.append(func():
+		var mi := bake.finish()
+		_store(key, mi.mesh)
+		props.free()
+		np.free())
+	return steps
 
 
 ## The logs on that place's woodpile: one MultiMesh (one draw), so the baked mesh does not depend on the count.
@@ -132,8 +174,11 @@ func _ground() -> void:
 
 # ------------------------------------------------------------------ an owned, built plot
 
-func _camp(r: Node3D) -> void:
-	var wall := _tc("wall", Color(1.35, 1.1, 0.85))
+func _camp_parts(r: Node3D) -> Array:
+	return [_camp_road.bind(r), _camp_kitchen.bind(r), _camp_dining.bind(r), _camp_cabins.bind(r)]
+
+
+func _camp_road(r: Node3D) -> void:
 	var truck := Art.truck()
 	truck.position = world.TRUCK_POS
 	truck.rotation.y = -0.25
@@ -142,6 +187,9 @@ func _camp(r: Node3D) -> void:
 	if theme.get("water", false):
 		Art.box(Vector3(5.0, 0.12, 1.4), Art.plank_mat(), Vector3(18.5, 0.25, 4.0), r)
 	_road_on(r)
+
+
+func _camp_kitchen(r: Node3D) -> void:
 	if _has("campfire"):
 		_cooker(r, world.FIRE_POS[0])
 		Art.box(Vector3(1.3, 0.1, 1.3), Art.plank_mat(), world.PILE_POS + Vector3(0, 0.05, 0), r)
@@ -157,10 +205,17 @@ func _camp(r: Node3D) -> void:
 		_cooker(r, world.FIRE_POS[1])
 	if int(state.get("crew", {}).get("lumberjack", 0)) > 0:
 		_figure(r, world.PILE_POS + Vector3(0.9, 0, 0.9), -0.6, Color(0.75, 0.2, 0.12))
+
+
+func _camp_dining(r: Node3D) -> void:
 	for id in ["tables_1", "tables_2"]:
 		if _has(id):
 			for c in world.TABLES[id]:
 				_table(r, c)
+
+
+func _camp_cabins(r: Node3D) -> void:
+	var wall := _tc("wall", Color(1.35, 1.1, 0.85))
 	if _has("shop"):
 		var cab := Art.cabin(2.6, 2.2, wall)
 		cab.position = world.SHOP_POS

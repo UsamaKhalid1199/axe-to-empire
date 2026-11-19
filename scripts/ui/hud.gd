@@ -302,11 +302,60 @@ func _vw() -> float:
 
 
 func show_toast(text: String) -> void:
+	if _hold_new_player() and _holdable(text):
+		_held_toasts.append(text)
+		return
 	_toast_q.append(text)
+
+
+## A new player's first minutes: until the first build (the campfire) is done, golden-tree and job/task prompts
+## wait, so the top of the screen keeps saying what to do first. They come once it is built.
+var _held_toasts: Array = []
+var _held_beats: Array = []
+
+
+func _hold_new_player() -> bool:
+	return Game.venue == 0 and not Game.built.has("campfire")
+
+
+static func _holdable(text: String) -> bool:
+	var t := text.to_lower()
+	return t.contains("golden") or t.begins_with("job done") or t.contains("job paid") or t.begins_with("task")
+
+
+func _release_held() -> void:
+	if _held_toasts.is_empty() and _held_beats.is_empty():
+		return
+	_toast_q.append_array(_held_toasts)
+	_held_toasts.clear()
+	if not _held_beats.is_empty():
+		_story_q.append_array(_held_beats)
+		_held_beats.clear()
+
+
+## "Drag to move" stays until the player has walked a few metres (a first touch alone used to clear it).
+const HINT_WALK_M := 3.0
+var _hint_walked := 0.0
+var _hint_last := Vector3.INF
+
+
+func _hint_tick() -> void:
+	if joy.hint_alpha <= 0.0 or world == null or not is_instance_valid(world) or world.player == null:
+		return
+	var p: Vector3 = world.player.global_position
+	if _hint_last != Vector3.INF and p.distance_to(_hint_last) < 1.5:       # (a jump = a new place, not a walk)
+		_hint_walked += Vector2(p.x - _hint_last.x, p.z - _hint_last.z).length()
+	_hint_last = p
+	if _hint_walked >= HINT_WALK_M:
+		joy.hint_alpha = maxf(0.0, joy.hint_alpha - get_process_delta_time() * 2.5)
+		joy.queue_redraw()
 
 
 func _process(delta: float) -> void:
 	_play_s += delta
+	_hint_tick()
+	if not _hold_new_player():
+		_release_held()
 	# animated coin counter
 	var target := float(Game.coins)
 	if absf(_coin_shown - target) > 0.5:
@@ -580,6 +629,7 @@ func _rebuild_modal_now() -> void:
 		"bigday_result": _bigday_result(v)
 		"howto": _howto(v)
 		"stats": _stats(v)
+		"quit": _quit(v)
 
 
 func _header(v: VBoxContainer, icon_name: String, title: String, sub := "", closable := true) -> void:
@@ -605,6 +655,60 @@ func _header(v: VBoxContainer, icon_name: String, title: String, sub := "", clos
 		x.pressed.connect(_close_or_back)
 		h.add_child(x)
 	v.add_child(h)
+
+
+## Android back (main.gd, NOTIFICATION_WM_GO_BACK_REQUEST): closes what is open first, doing what that card's
+## own way out does; with nothing open it asks before leaving the game.
+func go_back() -> void:
+	match modal_kind:
+		"":
+			open_modal("quit")
+		"story":
+			if not _story_q.is_empty():
+				_story_q.pop_front()
+			_story_last_s = _play_s
+			if _story_q.is_empty():
+				_story_replay = false
+			close_modal()
+		"offline":
+			Game.claim_offline()
+			close_modal()
+		"complete":
+			if _confirm_prestige:
+				_confirm_prestige = false        # back out of the New Empire confirm only
+				_rebuild_modal()
+			else:
+				close_modal()                    # = STAY HERE
+		"settings":
+			if _confirm_reset:
+				_confirm_reset = false
+				_rebuild_modal()
+			else:
+				close_modal()
+		_:
+			_close_or_back()
+
+
+## The "Leave the game?" prompt (back with nothing open). The game is saved before it quits.
+func _quit(v: VBoxContainer) -> void:
+	_header(v, "info", "Leave the game?", "Your progress is saved")
+	var keep := UI.button("KEEP PLAYING", "green", "", 30)
+	keep.pressed.connect(close_modal)
+	v.add_child(keep)
+	var gap := Control.new()
+	gap.custom_minimum_size.y = 28
+	gap.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	v.add_child(gap)
+	var q := UI.button("QUIT", "red", "", 24)
+	q.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	q.custom_minimum_size.x = 260
+	q.pressed.connect(quit_game)
+	v.add_child(q)
+
+
+func quit_game() -> void:
+	Game.save_game()
+	get_tree().quit()
 
 
 ## ✕ on a Settings sub-screen (How to play, Stats) goes back to Settings; elsewhere it closes.
@@ -1044,7 +1148,9 @@ func _empire(v: VBoxContainer) -> void:
 var _map_tills: Array = []          # [k, Label, ProgressBar] of the open map, updated in place
 
 
-## "$1,240 / $3,600" ("... · FULL" when the counter is full) with a fill bar: place k's counter and how much it holds.
+## "$1,240 / $3,600" with a fill bar: place k's counter and how much its crew will pile up there. At or over the cap
+## (cash collected there while you were in charge is not capped and stays when you leave) it reads "$842.3K · FULL"
+## (never a cap smaller than the amount); a place with no crew earning just says what is waiting.
 func _till_meter(k: int) -> Control:
 	var col := UI.vbox(4)
 	col.name = "Till%d" % k
@@ -1065,11 +1171,21 @@ func _till_meter(k: int) -> Control:
 
 
 func _set_till_meter(k: int, l: Label, bar: ProgressBar) -> void:
+	l.text = till_meter_text(k)
 	var t := Game.till(k)
-	var cap := Game.till_cap(k)
-	l.text = ("%s / %s" % [UI.cash(t), UI.cash(cap)]) + (" · FULL" if t >= cap else "")
-	bar.max_value = maxi(1, cap)
+	bar.max_value = maxi(1, maxi(t, Game.till_cap(k)))
 	bar.value = t
+
+
+static func till_meter_text(k: int) -> String:
+	var t := Game.till(k)
+	var growing := Game.venue_rate(k) > 0.0
+	if not growing:
+		return "%s waiting" % UI.cash(t)
+	var cap := Game.till_cap(k)
+	if t >= cap:
+		return "%s · FULL" % UI.cash(t)        # the crew have stopped adding to it: go and collect
+	return "%s / %s" % [UI.cash(t), UI.cash(cap)]
 
 
 func _refresh_map_tills() -> void:
@@ -1198,6 +1314,10 @@ func _tick_overlays() -> void:
 	if Game.venue != _till_venue:          # walked over to another place: its till is now the counter
 		_till_venue = Game.venue
 		_till_dirty = true
+	_till_live_t -= 0.25
+	if _till_live_t <= 0.0:
+		_till_live_t = 1.0
+		_till_dirty = true             # (the chip and an open map always show the same, current amounts)
 	if _till_dirty:
 		_refresh_till_chip()
 	_place_till_chip()
@@ -1240,6 +1360,9 @@ func _richest_till() -> int:
 			amt = t
 			best = k
 	return best
+
+
+var _till_live_t := 0.0
 
 
 ## Called on tills_changed / state_changed / arriving somewhere (batched to 4x a second), not every frame.
@@ -1339,7 +1462,12 @@ func _bigday_result(v: VBoxContainer) -> void:
 func _on_story(beats: Array) -> void:
 	if not Game.settings.get("story", true):
 		return
-	_story_q.append_array(_merge_beats(beats))
+	var now := _merge_beats(beats)
+	if _hold_new_player():
+		# (the opening beats still show; anything else, e.g. the golden tree card, waits for the first build)
+		_held_beats.append_array(now.filter(func(b): return String(b.get("on", "")) != "start"))
+		now = now.filter(func(b): return String(b.get("on", "")) == "start")
+	_story_q.append_array(now)
 	if modal_kind == "":
 		_next_story.call_deferred()
 

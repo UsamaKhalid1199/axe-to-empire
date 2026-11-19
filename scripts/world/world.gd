@@ -109,6 +109,10 @@ var nb_plots: Dictionary = {}      # side (-1 west, +1 east) -> NeighborPlot
 var _gap_shapes: Dictionary = {}   # side -> CollisionShape3D closing the road at that plot edge
 var _nb_unlocked := -1
 var _cross_armed := true           # false right after arriving at an edge, until the player steps inside
+var _disarmed_t := 0.0             # seconds since arriving (disarmed): after ARM_AFTER the edge re-arms anyway
+const ARRIVE_IN := 1.0             # arrivals stand this far inside the edge: clear of the (closed) road-gap wall
+const ARM_IN := 1.6                # the edge re-arms once the player is this far inside (or after ARM_AFTER)
+const ARM_AFTER := 2.0            # (pushing back on the closed edge that long means it: let them walk back)
 var _crossing := false
 var _edge_warn_ms := -100000
 var _edge_warn_msg := ""
@@ -506,10 +510,25 @@ func _decor() -> void:
 	add_child(Plot.band_node(Game.venue, bx0, bx1))
 
 
-## Batches every mesh of a model into MultiMeshes: one draw per sub-mesh for all copies.
-func _scatter_model(name: String, xfs: Array) -> void:
+## Every lantern in the place (camp posts, the counter, the Lodge's tables) drawn together: one MultiMesh per
+## lantern part (5 draws for all of them; each lantern on its own was 5 draws, ~45 at the Lodge).
+var _lantern_xfs: Array = []
+var _lantern_mmis: Array = []
+
+
+func _add_lanterns(xfs: Array) -> void:
+	_lantern_xfs.append_array(xfs)
+	for m in _lantern_mmis:
+		if is_instance_valid(m):
+			m.free()
+	_lantern_mmis = _scatter_model("wooden_lantern_01", _lantern_xfs, false)
+
+
+## Batches every mesh of a model into MultiMeshes: one draw per sub-mesh for all copies. `thin`: Smooth graphics
+## draws only some of them (scattered plants; not lanterns).
+func _scatter_model(name: String, xfs: Array, thin := true) -> Array:
 	if xfs.is_empty():
-		return
+		return []
 	var m := Art.model(name)
 	var parts: Array = []
 	var stack: Array = [[m, Transform3D.IDENTITY]]
@@ -523,6 +542,7 @@ func _scatter_model(name: String, xfs: Array) -> void:
 				if c is MeshInstance3D and c.mesh:
 					parts.append([c.mesh, cx])
 				stack.append([c, cx])
+	var out: Array = []
 	for part in parts:
 		var mm := MultiMesh.new()
 		mm.transform_format = MultiMesh.TRANSFORM_3D
@@ -533,9 +553,12 @@ func _scatter_model(name: String, xfs: Array) -> void:
 		var mmi := MultiMeshInstance3D.new()
 		mmi.multimesh = mm
 		mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		mmi.add_to_group("scatter")
+		if thin:
+			mmi.add_to_group("scatter")
 		add_child(mmi)
+		out.append(mmi)
 	m.free()
+	return out
 
 
 ## Forest batching: one MultiMesh per pine variant draws every idle standing tree (1 draw instead of ~60).
@@ -664,13 +687,27 @@ func _static_camp() -> void:
 		var arch := Art.arch("NEW EMPIRE")
 		arch.position = Vector3(GATE_POS.x, 0, Plot.ROAD_GAP.x - 1.3)
 		add_child(arch)
-	# lanterns and props around the camp
+	# lanterns on posts around the camp (all the camp's lanterns are one MultiMesh per lantern part: _add_lanterns;
+	# the posts one MultiMesh)
+	var posts: Array = []
+	var lans: Array = []
 	for p in [Vector3(-4.2, 0, 1.2), Vector3(3.8, 0, 0.2), Vector3(-1.2, 0, 10.2), Vector3(3.6, 0, 10.2)]:
-		var post := Art.cylinder(0.06, 1.6, Art.pbr("bark_brown_02"), p + Vector3(0, 0.8, 0), self, 8)
-		post.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
-		var lan := Art.model("wooden_lantern_01")
-		lan.position = p + Vector3(0, 1.6, 0)
-		add_child(lan)
+		posts.append(Transform3D(Basis(), p + Vector3(0, 0.8, 0)))
+		lans.append(Transform3D(Basis(), p + Vector3(0, 1.6, 0)))
+	var post := Art.cylinder(0.06, 1.6, Art.pbr("bark_brown_02"), Vector3.ZERO, null, 8)
+	var pmm := MultiMesh.new()
+	pmm.transform_format = MultiMesh.TRANSFORM_3D
+	pmm.mesh = post.mesh
+	pmm.instance_count = posts.size()
+	for i in posts.size():
+		pmm.set_instance_transform(i, posts[i])
+	post.free()
+	var pmi := MultiMeshInstance3D.new()
+	pmi.name = "LanternPosts"
+	pmi.multimesh = pmm
+	pmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF if LOW_END else GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+	add_child(pmi)
+	_add_lanterns(lans)
 	var crates := Art.model("wooden_crate_01")
 	crates.position = Vector3(-4.0, 0, -2.6)
 	add_child(crates)
@@ -726,6 +763,9 @@ func _chapter_props() -> void:
 			oar.rotation.y = 0.9
 		"lodge":
 			var snow := Art.paint(Color(0.96, 0.97, 1.0), 0.7)
+			var snowman := Node3D.new()
+			snowman.name = "Snowman"
+			add_child(snowman)
 			for i in 3:
 				var r: float = [0.42, 0.31, 0.22][i]
 				var y: float = [0.4, 1.05, 1.52][i]
@@ -739,10 +779,11 @@ func _chapter_props() -> void:
 				mi.mesh = sm
 				mi.position = spot + Vector3(0, y, 0)
 				mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
-				add_child(mi)
+				snowman.add_child(mi)
 			for x in [-0.3, 0.3]:
-				var ski := Art.box(Vector3(0.08, 1.7, 0.05), Art.paint(Color(0.85, 0.2, 0.15), 0.4), spot + Vector3(1.0 + x, 0.85, 0.3), self)
+				var ski := Art.box(Vector3(0.08, 1.7, 0.05), Art.paint(Color(0.85, 0.2, 0.15), 0.4), spot + Vector3(1.0 + x, 0.85, 0.3), snowman)
 				ski.rotation.z = 0.12
+			Art.merge_static(snowman)          # 5 parts -> one draw per material
 		"smoke":
 			var hay := Art.paint(Color(0.86, 0.7, 0.32), 0.95)
 			for i in 2:
@@ -853,9 +894,12 @@ func _sync_fence_zone() -> void:
 
 
 ## Road edges: open/close the gaps, hand the player over to the next plot, explain a closed way.
+## The gap in the road wall is only open while walking across would really happen (owned plot next door, no Big
+## Day, and the edge armed): a disarmed edge used to leave it open, so turning back right after arriving walked
+## the player out past the edge into the neighbour's still picture and the void.
 func _road_tick() -> void:
 	for side in _gap_shapes:
-		var shut := not can_cross(side)
+		var shut := not can_cross(side) or not _cross_armed
 		var cs: CollisionShape3D = _gap_shapes[side]
 		if cs.disabled == shut:
 			cs.set_deferred("disabled", not shut)
@@ -864,12 +908,17 @@ func _road_tick() -> void:
 	var pp := player.global_position
 	var we := Plot.west(Game.venue)
 	var ee := Plot.east(Game.venue)
+	if _out_of_bounds(pp, we, ee):
+		return
 	if modal_kind == "gate":
 		_fence_prompted = true
 	elif pp.x > we + 4.0:
 		_fence_prompted = false     # walked away: the next approach prompts again
 	if not _cross_armed:
-		_cross_armed = pp.x > we + 1.2 and pp.x < ee - 1.2
+		_disarmed_t += get_process_delta_time()
+		var inside := pp.x > we + ARM_IN and pp.x < ee - ARM_IN
+		var away := pp.x > we + ARRIVE_IN - 0.25 and pp.x < ee - ARRIVE_IN + 0.25   # (inside the plot)
+		_cross_armed = inside or (_disarmed_t > ARM_AFTER and away)
 		return
 	if pp.z < Plot.ROAD_GAP.x or pp.z > Plot.ROAD_GAP.y:
 		return
@@ -905,11 +954,33 @@ func _road_tick() -> void:
 		Game.toast.emit(msg)
 
 
+## Safety net: the player must never be outside the play area (past a plot edge, beyond the road walls). If they
+## somehow are (a collider toggling late, a physics push), walk them across when that way is open, else put them
+## back inside. Returns true when it acted.
+func _out_of_bounds(pp: Vector3, we: float, ee: float) -> bool:
+	var out_x := pp.x < we - 0.05 or pp.x > ee + 0.05
+	var out_z := pp.z < -26.4 or pp.z > 14.2
+	if not out_x and not out_z:
+		return false
+	var side := -1 if pp.x < we else 1
+	if out_x and can_cross(side) and pp.z > Plot.ROAD_GAP.x - 0.6 and pp.z < Plot.ROAD_GAP.y + 0.6:
+		_cross(side)
+		return true
+	var back := Vector3(clampf(pp.x, we + ARRIVE_IN, ee - ARRIVE_IN), 0.0, clampf(pp.z, -25.5, 13.6))
+	if out_x:
+		back.z = clampf(back.z, Plot.ROAD_GAP.x + 0.4, 13.6)      # back onto the road the edge opens to
+	player.global_position = back
+	player._vel = Vector3.ZERO
+	_cross_armed = false
+	_disarmed_t = 0.0
+	return true
+
+
 func _cross(side: int) -> void:
 	var k := Plot.neighbour(Game.venue, side)
 	_crossing = true
 	var dir := float(side)
-	var x := Plot.east(k) - 0.6 if side < 0 else Plot.west(k) + 0.6
+	var x := Plot.east(k) - ARRIVE_IN if side < 0 else Plot.west(k) + ARRIVE_IN
 	var arrive := {"x": x, "z": clampf(player.global_position.z, 10.0, 13.6), "yaw": atan2(dir, 0.0)}
 	arrive.merge(carried())
 	cross_requested.emit(k, arrive)
@@ -1026,9 +1097,7 @@ func _spawn_building(id: String, animate: bool) -> void:
 			ct.position = COUNTER_POS
 			root.add_child(ct)
 			_collider(COUNTER_POS + Vector3(0, 0.5, 0), Vector3(2.8, 1.0, 0.8))
-			var lan := Art.model("wooden_lantern_01")
-			lan.position = COUNTER_POS + Vector3(1.15, 1.03, 0.1)
-			root.add_child(lan)
+			_add_lanterns([Transform3D(Basis(), COUNTER_POS + Vector3(1.15, 1.03, 0.1))])
 			counter_stack = Stack.new().setup("dish", Stack.Layout.COUNTER)
 			counter_stack.position = COUNTER_POS + Vector3(-0.1, 0, 0)
 			root.add_child(counter_stack)
@@ -1038,9 +1107,7 @@ func _spawn_building(id: String, animate: bool) -> void:
 			root.add_child(coin_stack)
 			coin_stack.set_count(_coin_visuals(Game.counter_coins))
 			coin_zone = _zone("coins", "coins", COIN_POS, Vector2(1.6, 1.6), Color("#FFD978"), "")
-			# standing anywhere on the pad (the player's body over its edge, e.g. pressed against the counter's
-			# end) collects: the pad edge alone missed a player who visibly stood on it
-			coin_zone.reach = 0.45
+			# (like every pad, standing with the body over its edge collects: Zone.reach)
 			var bench := Art.model("wooden_stool_01")
 			bench.position = FIRE_POS[0] + Vector3(-1.1, 0, 0.4)
 			root.add_child(bench)
@@ -1138,9 +1205,7 @@ func _dining_table(c: Vector3, root: Node3D) -> void:
 		shade.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
 		root.add_child(shade)
 	elif style == "lodge":
-		var lan := Art.model("wooden_lantern_01")
-		lan.position = c + Vector3(0, 0.68, 0)
-		root.add_child(lan)
+		_add_lanterns([Transform3D(Basis(), c + Vector3(0, 0.68, 0))])
 
 
 ## Parasols are the only tall thing in the dining area: right under the camera (the player up by the cookers or
@@ -1638,10 +1703,20 @@ func _process(delta: float) -> void:
 
 func _zones_tick(delta: float) -> void:
 	var pp := player.global_position
+	# every pad counts the player's body over its edge (Zone.reach); where two pads' margins meet, only the one
+	# the player is closest to (or actually inside) is active
+	var near := {}
+	var best := INF
+	for z in zones:
+		if is_instance_valid(z):
+			var d: float = z.edge_dist(pp)
+			if d <= z.reach:
+				near[z] = d
+				best = minf(best, d)
 	for z in zones.duplicate():
 		if not is_instance_valid(z):
 			continue
-		var inside: bool = z.contains(pp)
+		var inside: bool = near.has(z) and (float(near[z]) <= 0.0 or float(near[z]) <= best)
 		var was: bool = _inside.get(z, false)
 		if inside != was:
 			_inside[z] = inside

@@ -10,7 +10,12 @@ var label: Label3D
 var icon: Sprite3D
 var tick := 0.0           # caller-owned timer
 var occupied := false
-var reach := 0.0          # metres past the pad's edge that still count as on it (the player's body overlapping it)
+## Metres past the pad's edge that still count as standing on it: the player's body (0.32 m radius) over the
+## pad. With the origin strictly inside, a player who visibly stood on a pad's edge on the phone got nothing
+## (a campfire pad took $20 of $24 and never the last $4). Where pads lie closer than 2 x REACH, World picks
+## the pad the player is closest to (World._zones_tick), so two neighbours never both fire from their margins.
+const REACH := 0.45
+var reach := REACH
 
 
 func setup(zone_id: String, zone_kind: String, sz: Vector2, color: Color, text := "", icon_path := "", dashed := false) -> Zone:
@@ -71,5 +76,10 @@ func set_active(on: bool) -> void:
 
 
 func contains(p: Vector3) -> bool:
+	return edge_dist(p) <= reach
+
+
+## How far p is outside the pad (<= 0 inside it), measured on the ground (the larger of the x and z overshoots).
+func edge_dist(p: Vector3) -> float:
 	var l := p - global_position
-	return absf(l.x) <= size.x * 0.5 + reach and absf(l.z) <= size.y * 0.5 + reach
+	return maxf(absf(l.x) - size.x * 0.5, absf(l.z) - size.y * 0.5)

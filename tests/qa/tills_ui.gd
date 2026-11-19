@@ -122,7 +122,9 @@ func _run() -> void:
 		var l0: String = t0.get_node("TillText").text
 		var l2: String = t2.get_node("TillText").text
 		var cap0: int = g.till_cap(0)
-		ok(l0.contains("$12.3K") and l0.contains(_cash(cap0)), "map row 1 till: '%s' (cap %d)" % [l0, cap0])
+		# (a till at or over its cap reads "$X · FULL", like the chip, instead of an over-the-cap "$X / $cap")
+		var want0: bool = l0.contains("FULL") if 12300 >= cap0 else l0.contains(_cash(cap0))
+		ok(l0.contains("$12.3K") and want0, "map row 1 till: '%s' (cap %d)" % [l0, cap0])
 		ok(l2.contains("$20K"), "map row 3 till: '%s'" % l2)
 		var bar: ProgressBar = t2.get_child(1)
 		ok(is_equal_approx(bar.value, 20000.0) or bar.value == bar.max_value, "row 3 bar shows the till (%s / %s)" % [bar.value, bar.max_value])
